@@ -379,7 +379,8 @@ final class CaptureOverlayView: NSView {
         "\(Int((rect.width * snapper.scale).rounded())) × \(Int((rect.height * snapper.scale).rounded()))"
     }
 
-    /// Thin lines across the screen through the pointer, outlined so they show on light and dark.
+    /// Faint lines across the screen through the pointer. A barely-there dark edge keeps them
+    /// findable over white areas without drawing attention.
     private func drawCrosshair(at point: CGPoint) {
         let x = floor(point.x) + 0.5, y = floor(point.y) + 0.5
         let path = NSBezierPath()
@@ -387,10 +388,10 @@ final class CaptureOverlayView: NSView {
         path.line(to: CGPoint(x: bounds.width, y: y))
         path.move(to: CGPoint(x: x, y: 0))
         path.line(to: CGPoint(x: x, y: bounds.height))
-        NSColor.black.withAlphaComponent(0.35).setStroke()
-        path.lineWidth = 3
+        NSColor.black.withAlphaComponent(0.08).setStroke()
+        path.lineWidth = 2
         path.stroke()
-        NSColor.white.withAlphaComponent(0.9).setStroke()
+        NSColor.white.withAlphaComponent(0.28).setStroke()
         path.lineWidth = 1
         path.stroke()
     }
@@ -408,7 +409,7 @@ final class CaptureOverlayView: NSView {
         }
         path.lineWidth = 1
         path.setLineDash([5, 4], count: 2, phase: 0)
-        NSColor.white.withAlphaComponent(0.55).setStroke()
+        NSColor.white.withAlphaComponent(0.2).setStroke()
         path.stroke()
     }
 
