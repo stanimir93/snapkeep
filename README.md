@@ -8,8 +8,22 @@ preview you can select text straight from the image (Live Text) and draw on it.
 
 | Shortcut | Action |
 | --- | --- |
-| `⇧⌘2` | Capture an area. Drag an area, press Space to pick a window, Esc to cancel. |
+| `⇧⌘2` | Capture an area or a window |
 | `⇧⌘1` | Capture an area's text and copy it. No preview and no file. |
+
+Both freeze the screen and dim it. Nothing is captured until you confirm:
+
+| While selecting | Action |
+| --- | --- |
+| Hover, click | Highlight the window under the pointer, click to select it |
+| Drag | Select an area. Edges snap to window borders and to the lines between sections of an app (sidebars, toolbars, panes). |
+| Drag inside / handles | Move the selection / resize it |
+| Arrow keys | Move the selection 1 pt (10 with Shift) |
+| `F` | Select the whole screen |
+| `Tab` | Turn snapping on or off |
+| `⌥` while dragging | Drag without snapping |
+| Return, double-click, **Capture** | Capture the selection |
+| `Esc` | Cancel |
 
 In a preview:
 
@@ -37,18 +51,23 @@ Each ad-hoc build has a new signature, so macOS forgets the Screen Recording per
 `./build.sh install` resets the old entry, and macOS asks again on the next launch. After you
 allow it, quit Snapkeep from its menu and open it again.
 
-To check the preview layout without screen access:
+To check the layout without screen access:
 
 ```sh
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-preview some.png out-dir/
+build/Snapkeep.app/Contents/MacOS/Snapkeep --render-overlay screen.png out-dir/
 ```
 
-This writes `window-plain.png`, `window-drawn.png` (with sample drawings) and `export.png` to
-`out-dir`, prints how long Live Text took, and quits.
+`--render-preview` writes `window-plain.png`, `window-drawn.png` (with sample drawings) and
+`export.png`, and prints how long Live Text took. `--render-overlay` draws the capture overlay over
+`screen.png` while hovering a window and with a snapped selection, and writes the cropped capture.
 
 ## How it works
 
-- Capture runs `/usr/sbin/screencapture -i -x`, which provides macOS's own area and window picker.
+- Capture freezes every display with ScreenCaptureKit (leaving out Snapkeep's own previews) and
+  crops the selection from that frozen image, so what you see is exactly what you get.
+- Window highlighting uses `CGWindowListCopyWindowInfo`. Line snapping looks for columns or rows of
+  pixels that differ from their neighbours along most of the edge being dragged.
 - Global shortcuts use Carbon `RegisterEventHotKey`, which needs no Accessibility permission.
 - Live Text uses VisionKit's `ImageAnalyzer` and `ImageAnalysisOverlayView`. Analysis starts as
   soon as the preview opens.

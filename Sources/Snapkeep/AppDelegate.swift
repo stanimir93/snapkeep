@@ -5,7 +5,7 @@ import ServiceManagement
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let library = ScreenshotLibrary()
-    private let capturer = ScreenCapturer()
+    private var session: CaptureSession?
     private var previews: [PreviewController] = []
     private var lastScreenshot: URL?
 
@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let index = CommandLine.arguments.firstIndex(of: "--render-preview") {
             runRenderCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--render-overlay") {
+            runOverlayCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
             return
         }
         setUpStatusItem()
@@ -37,8 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(item("Capture", action: #selector(captureArea), key: "2"))
-        menu.addItem(item("Capture Text", action: #selector(captureText), key: "1"))
+        menu.addItem(item("Capture", action: #selector(captureAreaFromMenu), key: "2"))
+        menu.addItem(item("Capture Text", action: #selector(captureTextFromMenu), key: "1"))
         menu.addItem(.separator())
         menu.addItem(item("Show Last Screenshot", action: #selector(showLastScreenshot)))
         menu.addItem(item("Open Screenshots Folder", action: #selector(openFolder)))
@@ -90,50 +94,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Capture
 
     @objc func captureArea() {
-        let url: URL
-        do {
-            url = try library.newFileURL()
-        } catch {
-            Toast.show("Couldn't create the Screenshots folder", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
-            return
-        }
-        capturer.capture(to: url) { [weak self] captured in
-            guard captured, let self else { return }
-            guard let screenshot = Screenshot.load(url) else {
-                Toast.show("Couldn't read the screenshot", symbol: "exclamationmark.triangle")
-                return
+        startCapture(.image)
+    }
+
+    @objc func captureText() {
+        startCapture(.text)
+    }
+
+    /// Waits for the menu to fade out so it isn't frozen into the capture.
+    @objc private func captureAreaFromMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.captureArea() }
+    }
+
+    @objc private func captureTextFromMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.captureText() }
+    }
+
+    private func startCapture(_ mode: CaptureMode) {
+        guard session == nil else { return }
+        let session = CaptureSession(mode: mode) { [weak self] capture in
+            guard let self else { return }
+            self.session = nil
+            guard let capture else { return }
+            switch mode {
+            case .image: self.keepCapture(capture)
+            case .text: self.copyText(from: capture)
             }
-            Clipboard.copyPNG(screenshot.pngData)
-            self.lastScreenshot = url
-            self.openPreview(screenshot, status: "Copied to clipboard")
+        }
+        self.session = session
+        Task { @MainActor in
+            do {
+                try await session.start()
+            } catch {
+                session.finish(nil)
+                NSLog("Snapkeep capture failed: %@", String(describing: error))
+                if !CGPreflightScreenCaptureAccess() {
+                    Toast.show("Snapkeep needs Screen Recording permission",
+                               detail: "Allow it in System Settings, then quit and reopen Snapkeep", symbol: "lock.shield")
+                    self.openScreenRecordingSettings()
+                } else {
+                    Toast.show("Couldn't capture the screen", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+                }
+            }
         }
     }
 
-    /// Captures an area and copies only its text. Nothing is kept on disk.
-    @objc func captureText() {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("snapkeep-text-\(UUID().uuidString).png")
-        capturer.capture(to: url) { captured in
-            guard captured else { return }
-            let screenshot = Screenshot.load(url)
-            try? FileManager.default.removeItem(at: url)
-            guard let screenshot else {
-                Toast.show("Couldn't read the capture", symbol: "exclamationmark.triangle")
-                return
-            }
-            Task { @MainActor in
-                do {
-                    let analysis = try await TextRecognizer.analyze(screenshot.cgImage)
-                    let text = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if text.isEmpty {
-                        Toast.show("No text found", symbol: "text.viewfinder")
-                    } else {
-                        Clipboard.copyText(text)
-                        let firstLine = text.split(separator: "\n").first.map(String.init) ?? text
-                        Toast.show("Copied text", detail: firstLine, symbol: "checkmark.circle.fill")
-                    }
-                } catch {
-                    Toast.show("Text recognition failed", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+    /// Saves to ~/Pictures/Screenshots, copies, and opens a preview.
+    private func keepCapture(_ capture: CaptureSession.Capture) {
+        guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
+            Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
+            return
+        }
+        Clipboard.copyPNG(data)
+        let url: URL
+        do {
+            url = try library.newFileURL()
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Toast.show("Copied, but couldn't save the file", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+            return
+        }
+        lastScreenshot = url
+        openPreview(Screenshot(url: url, pngData: data, cgImage: capture.image, pointSize: capture.pointSize),
+                    status: "Copied to clipboard")
+    }
+
+    /// Copies only the text. Nothing is kept on disk.
+    private func copyText(from capture: CaptureSession.Capture) {
+        Task { @MainActor in
+            do {
+                let analysis = try await TextRecognizer.analyze(capture.image)
+                let text = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty {
+                    Toast.show("No text found", symbol: "text.viewfinder")
+                } else {
+                    Clipboard.copyText(text)
+                    let firstLine = text.split(separator: "\n").first.map(String.init) ?? text
+                    Toast.show("Copied text", detail: firstLine, symbol: "checkmark.circle.fill")
                 }
+            } catch {
+                Toast.show("Text recognition failed", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
             }
         }
     }
@@ -226,5 +266,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 exit(1)
             }
         }
+    }
+
+    /// `Snapkeep --render-overlay screen.png out-dir`: draws the capture overlay over an image in a
+    /// few states (hovering a window, a finished selection) without touching the real screen.
+    private func runOverlayCheck(arguments: [String]) {
+        guard arguments.count >= 2, let screen = Screenshot.load(URL(fileURLWithPath: arguments[0])) else {
+            print("usage: Snapkeep --render-overlay <screen.png> <output-dir>")
+            exit(2)
+        }
+        let output = URL(fileURLWithPath: arguments[1], isDirectory: true)
+        let size = screen.pointSize
+        let fakeWindow = WindowInfo(frame: CGRect(x: size.width * 0.05, y: size.height * 0.08,
+                                                  width: size.width * 0.6, height: size.height * 0.8), owner: "Notes")
+        let overlay = CaptureOverlayView(size: size, image: screen.cgImage, windows: [fakeWindow], mode: .image)
+        let window = CaptureOverlayWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = overlay
+        overlay.setEdgeMap(EdgeMap(image: screen.cgImage))
+
+        func render(_ name: String) {
+            overlay.layoutSubtreeIfNeeded()
+            guard let rep = overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds) else { return }
+            overlay.cacheDisplay(in: overlay.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: output.appendingPathComponent(name))
+        }
+
+        overlay.setStateForCheck(mouse: CGPoint(x: size.width * 0.3, y: size.height * 0.5), selection: nil)
+        render("overlay-hover.png")
+        // Near the mock window's sidebar divider, right edge and toolbar line.
+        let start = CGPoint(x: size.width * 0.211, y: size.height * 0.578)
+        let end = CGPoint(x: size.width * 0.646, y: size.height * 0.827)
+        let snapped = overlay.snappedDragForCheck(from: start, to: end)
+        print("drag \(start) → \(end) snapped to \(snapped)")
+        overlay.setStateForCheck(mouse: end, selection: snapped)
+        render("overlay-selection.png")
+        if let captured = overlay.capturedImage() {
+            try? Renderer.encodePNG(captured.image, pointSize: captured.pointSize)?.write(to: output.appendingPathComponent("overlay-capture.png"))
+        }
+        exit(0)
     }
 }

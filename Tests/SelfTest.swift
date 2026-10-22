@@ -56,6 +56,21 @@ struct SelfTest {
         let untouched = pixel(rendered.cgImage, x: 1550, y: 380)
         check(untouched.r > 245 && untouched.g > 245 && untouched.b > 245, "undrawn area stays white: \(untouched)")
 
+        print("Snapping")
+        // 200×150 pt at 2x: white, with a 1 px grey line down column 200 and across row 100 (from the top).
+        let lines = makeLines(pixelSize: CGSize(width: 400, height: 300), column: 200, row: 100)
+        var snapper = Snapper(size: CGSize(width: 200, height: 150), scale: 2, edges: EdgeMap(image: lines))
+        let snappedX = snapper.snapX(103, along: 20...130)
+        check(snappedX == 100 || snappedX == 100.5, "x 103 snaps to the vertical line at 100: \(snappedX)")
+        let snappedY = snapper.snapY(97, along: 10...190)
+        check(snappedY == 100 || snappedY == 99.5, "y 97 snaps to the horizontal line at 100: \(snappedY)")
+        check(snapper.snapX(150, along: 20...130) == 150, "x 150 stays put, nothing nearby")
+        check(snapper.snapX(195, along: 20...130) == 200, "x 195 snaps to the screen edge")
+        snapper.windowFrames = [CGRect(x: 30, y: 20, width: 50, height: 100)]
+        check(snapper.snapX(84, along: 40...60) == 80, "x 84 snaps to a window edge at 80")
+        snapper.isEnabled = false
+        check(snapper.snapX(103.2, along: 20...130) == 103, "snapping off only rounds to the pixel grid")
+
         print("Live Text")
         check(TextRecognizer.isSupported, "ImageAnalyzer is supported")
         let started = Date()
@@ -85,6 +100,19 @@ struct SelfTest {
         NSGraphicsContext.restoreGraphicsState()
         let image = context.makeImage()!
         return Renderer.encodePNG(image, pointSize: CGSize(width: pixelSize.width * 72 / dpi, height: pixelSize.height * 72 / dpi))!
+    }
+
+    static func makeLines(pixelSize: CGSize, column: Int, row: Int) -> CGImage {
+        let context = CGContext(data: nil, width: Int(pixelSize.width), height: Int(pixelSize.height), bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(origin: .zero, size: pixelSize))
+        context.setFillColor(CGColor(red: 0.8, green: 0.8, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: column, y: 0, width: 1, height: Int(pixelSize.height)))
+        // CG's origin is bottom-left, so row-from-top r sits at y = height - r - 1.
+        context.fill(CGRect(x: 0, y: Int(pixelSize.height) - row - 1, width: Int(pixelSize.width), height: 1))
+        return context.makeImage()!
     }
 
     /// Reads a pixel in image coordinates (origin bottom-left), converted to sRGB.
