@@ -41,8 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(item("Capture", action: #selector(captureAreaFromMenu), key: "2"))
-        menu.addItem(item("Capture Text", action: #selector(captureTextFromMenu), key: "1"))
+        menu.addItem(item("Capture", action: #selector(captureAreaFromMenu), key: "1"))
+        menu.addItem(item("Capture Text", action: #selector(captureTextFromMenu), key: "2"))
         menu.addItem(.separator())
         menu.addItem(item("Show Last Screenshot", action: #selector(showLastScreenshot)))
         menu.addItem(item("Open Screenshots Folder", action: #selector(openFolder)))
@@ -75,13 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func registerHotKeys() {
         let modifiers = cmdKey | shiftKey
         var failed: [String] = []
-        if !HotKeys.shared.register(keyCode: kVK_ANSI_2, modifiers: modifiers, handler: { [weak self] in self?.captureArea() }) {
-            failed.append("⇧⌘2 (Capture)")
+        if !HotKeys.shared.register(keyCode: kVK_ANSI_1, modifiers: modifiers, handler: { [weak self] in self?.captureArea() }) {
+            failed.append("⇧⌘1 (Capture)")
         }
-        if !HotKeys.shared.register(keyCode: kVK_ANSI_1, modifiers: modifiers, handler: { [weak self] in self?.captureText() }) {
-            failed.append("⇧⌘1 (Capture Text)")
+        if !HotKeys.shared.register(keyCode: kVK_ANSI_2, modifiers: modifiers, handler: { [weak self] in self?.captureText() }) {
+            failed.append("⇧⌘2 (Capture Text)")
         }
-        NSLog("Snapkeep shortcuts: %@", failed.isEmpty ? "registered ⇧⌘2 and ⇧⌘1" : "failed \(failed)")
+        NSLog("Snapkeep shortcuts: %@", failed.isEmpty ? "registered ⇧⌘1 and ⇧⌘2" : "failed \(failed)")
         if !failed.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Snapkeep couldn't register its shortcuts"
@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showLastScreenshot() {
         guard let url = lastScreenshot.flatMap({ FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }) ?? library.newest() else {
-            Toast.show("No screenshots yet", detail: "Press ⇧⌘2 to capture", symbol: "photo")
+            Toast.show("No screenshots yet", detail: "Press ⇧⌘1 to capture", symbol: "photo")
             return
         }
         if let open = previews.last(where: { $0.url.resolvingSymlinksInPath().path == url.resolvingSymlinksInPath().path }) {

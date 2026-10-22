@@ -65,8 +65,8 @@ To start Snapkeep with your Mac, choose **Open at Login** in its menu.
 
 | Shortcut | Action |
 | --- | --- |
-| `⇧⌘2` | Capture an area or a window |
-| `⇧⌘1` | Capture the text in an area and copy it. No preview and no file. |
+| `⇧⌘1` | Capture an area or a window |
+| `⇧⌘2` | Capture the text in an area and copy it. No preview and no file. |
 
 Both freeze the screen and dim it. Nothing is captured until you confirm:
 
