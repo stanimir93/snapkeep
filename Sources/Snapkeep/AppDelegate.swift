@@ -1,6 +1,4 @@
 import AppKit
-import Carbon.HIToolbox
-import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -10,8 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastScreenshot: URL?
 
     private var statusItem: NSStatusItem!
+    private var captureItem: NSMenuItem!
+    private var captureTextItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var permissionItem: NSMenuItem!
+    private lazy var settingsWindow = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let index = CommandLine.arguments.firstIndex(of: "--render-preview") {
@@ -20,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-overlay") {
             runOverlayCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--render-settings") {
+            runSettingsCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
             return
         }
         setUpStatusItem()
@@ -41,13 +46,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
-        menu.addItem(item("Capture", action: #selector(captureAreaFromMenu), key: "1"))
-        menu.addItem(item("Capture Text", action: #selector(captureTextFromMenu), key: "2"))
+        captureItem = item("Capture", action: #selector(captureAreaFromMenu))
+        menu.addItem(captureItem)
+        captureTextItem = item("Capture Text", action: #selector(captureTextFromMenu))
+        menu.addItem(captureTextItem)
         menu.addItem(.separator())
         menu.addItem(item("Show Last Screenshot", action: #selector(showLastScreenshot)))
         menu.addItem(item("Open Screenshots Folder", action: #selector(openFolder)))
         menu.addItem(item("Close All Previews", action: #selector(closeAllPreviews)))
         menu.addItem(.separator())
+        let settingsItem = item("Settings…", action: #selector(openSettings))
+        settingsItem.keyEquivalent = ","
+        menu.addItem(settingsItem)
         loginItem = item("Open at Login", action: #selector(toggleOpenAtLogin))
         menu.addItem(loginItem)
         permissionItem = item("Grant Screen Recording Access…", action: #selector(openScreenRecordingSettings))
@@ -58,36 +68,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
     }
 
-    private func item(_ title: String, action: Selector, key: String = "") -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+    private func item(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
-        if !key.isEmpty { item.keyEquivalentModifierMask = [.command, .shift] }
         return item
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        for (item, action) in [(captureItem!, ShortcutAction.capture), (captureTextItem!, .captureText)] {
+            let shortcut = ShortcutSettings.shared.shortcut(for: action)
+            item.keyEquivalent = shortcut?.menuKeyEquivalent ?? ""
+            item.keyEquivalentModifierMask = shortcut?.modifierFlags ?? []
+        }
+        loginItem.state = LoginItem.isEnabled ? .on : .off
         permissionItem.isHidden = CGPreflightScreenCaptureAccess()
     }
 
     // MARK: Shortcuts
 
     private func registerHotKeys() {
-        let modifiers = cmdKey | shiftKey
-        var failed: [String] = []
-        if !HotKeys.shared.register(keyCode: kVK_ANSI_1, modifiers: modifiers, handler: { [weak self] in self?.captureArea() }) {
-            failed.append("⇧⌘1 (Capture)")
-        }
-        if !HotKeys.shared.register(keyCode: kVK_ANSI_2, modifiers: modifiers, handler: { [weak self] in self?.captureText() }) {
-            failed.append("⇧⌘2 (Capture Text)")
-        }
-        NSLog("Snapkeep shortcuts: %@", failed.isEmpty ? "registered ⇧⌘1 and ⇧⌘2" : "failed \(failed)")
+        let settings = ShortcutSettings.shared
+        settings.handlers = [
+            .capture: { [weak self] in self?.captureArea() },
+            .captureText: { [weak self] in self?.captureText() },
+        ]
+        let failed = settings.register()
+        NSLog("Snapkeep shortcuts: %@", failed.isEmpty ? "registered" : "failed \(settings.describe(failed))")
         if !failed.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Snapkeep couldn't register its shortcuts"
-            alert.informativeText = "\(failed.joined(separator: " and ")) may be taken by another app. The menu bar icon still works."
+            alert.informativeText = "\(settings.describe(failed)) may be taken by another app. "
+                + "Choose different ones in Settings. The menu bar icon still works."
+            alert.addButton(withTitle: "Open Settings")
+            alert.addButton(withTitle: "OK")
             NSApp.activate()
-            alert.runModal()
+            if alert.runModal() == .alertFirstButtonReturn { openSettings() }
         }
     }
 
@@ -193,7 +208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showLastScreenshot() {
         guard let url = lastScreenshot.flatMap({ FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }) ?? library.newest() else {
-            Toast.show("No screenshots yet", detail: "Press ⇧⌘1 to capture", symbol: "photo")
+            let hint = ShortcutSettings.shared.shortcut(for: .capture).map { "Press \($0.displayName) to capture" }
+            Toast.show("No screenshots yet", detail: hint ?? "Choose Capture from the menu bar icon", symbol: "photo")
             return
         }
         if let open = previews.last(where: { $0.url.resolvingSymlinksInPath().path == url.resolvingSymlinksInPath().path }) {
@@ -214,22 +230,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Settings
 
+    @objc func openSettings() {
+        settingsWindow.show()
+    }
+
     @objc func toggleOpenAtLogin() {
-        let service = SMAppService.mainApp
-        do {
-            if service.status == .enabled {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
-        } catch {
-            let alert = NSAlert(error: error)
-            NSApp.activate()
-            alert.runModal()
-        }
-        if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
-        }
+        LoginItem.toggle()
     }
 
     @objc func openScreenRecordingSettings() {
@@ -260,6 +266,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try await Task.sleep(for: .milliseconds(100))
                 try preview.renderWindow(to: output.appendingPathComponent("window-drawn.png"))
                 try preview.currentPNG()?.write(to: output.appendingPathComponent("export.png"))
+                exit(0)
+            } catch {
+                print("render failed: \(error)")
+                exit(1)
+            }
+        }
+    }
+
+    /// `Snapkeep --render-settings out-dir`: writes the Settings window to out-dir/settings.png.
+    private func runSettingsCheck(arguments: [String]) {
+        guard let path = arguments.first else {
+            print("usage: Snapkeep --render-settings <output-dir>")
+            exit(2)
+        }
+        settingsWindow.show()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            do {
+                try self.settingsWindow.renderWindow(to: URL(fileURLWithPath: path, isDirectory: true).appendingPathComponent("settings.png"))
                 exit(0)
             } catch {
                 print("render failed: \(error)")

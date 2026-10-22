@@ -25,6 +25,12 @@ final class HotKeys {
         return true
     }
 
+    func unregisterAll() {
+        refs.forEach { UnregisterEventHotKey($0) }
+        refs.removeAll()
+        handlers.removeAll()
+    }
+
     private func fire(_ id: UInt32) {
         handlers[id]?()
     }

@@ -23,6 +23,7 @@ the image (Live Text) and draw on it.
 - **Select text in the image.** Live Text is ready as soon as the preview opens. Copy part of the
   text, or all of it with Copy Text.
 - **Text-only capture.** One shortcut copies the text in an area and skips the preview.
+- **Your own shortcuts.** Change both shortcuts in Settings.
 - **Quick drawing.** Pen, highlighter, arrow, rectangle and text are always on the toolbar, no
   editor to open. Copy and Save include the drawings at full resolution.
 - **Snapping selection.** The screen freezes while you select, and edges snap to windows and to
@@ -55,7 +56,7 @@ the menu bar.
 2. Turn on Snapkeep in **System Settings → Privacy & Security → Screen & System Audio Recording**.
 3. Quit Snapkeep from its menu and open it again.
 
-To start Snapkeep with your Mac, choose **Open at Login** in its menu.
+To start Snapkeep with your Mac, choose **Open at Login** in its menu or in Settings.
 
 > [!NOTE]
 > The app is signed ad hoc, so every build gets a new signature and macOS forgets the permission.
@@ -67,6 +68,8 @@ To start Snapkeep with your Mac, choose **Open at Login** in its menu.
 | --- | --- |
 | `⇧⌘1` | Capture an area or a window |
 | `⇧⌘2` | Capture the text in an area and copy it. No preview and no file. |
+
+These are the defaults. To change them, see [Settings](#settings).
 
 Both freeze the screen and dim it. Nothing is captured until you confirm:
 
@@ -96,14 +99,24 @@ In a preview:
 | `Esc` | Clear the text selection |
 
 The menu bar icon also has **Show Last Screenshot**, **Open Screenshots Folder**, **Close All
-Previews** and **Open at Login**.
+Previews**, **Settings…** and **Open at Login**.
+
+## Settings
+
+Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
+
+- **Shortcuts.** Click a shortcut and press the new keys. A shortcut needs `⌘`, `⌥` or `⌃` (function
+  keys work on their own). `Esc` cancels and `Delete` turns the shortcut off. If another app already
+  uses the keys, Snapkeep keeps the old shortcut and tells you. **Restore Defaults** brings back
+  `⇧⌘1` and `⇧⌘2`.
+- **Open Snapkeep at login.** The same switch as **Open at Login** in the menu.
 
 ## Development
 
 ```sh
 ./build.sh            # build/Snapkeep.app, signed ad hoc
 ./build.sh install    # also replace /Applications/Snapkeep.app and launch it
-./build.sh test       # self-tests: file names, full-resolution export, Live Text
+./build.sh test       # self-tests: file names, full-resolution export, snapping, shortcuts, Live Text
 ```
 
 To check the layout without screen access:
@@ -111,17 +124,19 @@ To check the layout without screen access:
 ```sh
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-preview some.png out-dir/
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-overlay screen.png out-dir/
+build/Snapkeep.app/Contents/MacOS/Snapkeep --render-settings out-dir/
 ```
 
 `--render-preview` writes `window-plain.png`, `window-drawn.png` (with sample drawings) and
 `export.png`, and prints how long Live Text took. `--render-overlay` draws the capture overlay over
 `screen.png` while hovering a window and with a snapped selection, and writes the cropped capture.
+`--render-settings` writes the Settings window to `settings.png`.
 
 ### Project layout
 
 | Path | What's there |
 | --- | --- |
-| `Sources/Snapkeep/` | The app: capture overlay, preview window, drawing canvas, Live Text, menu bar |
+| `Sources/Snapkeep/` | The app: capture overlay, preview window, drawing canvas, Live Text, menu bar, settings |
 | `Tests/SelfTest.swift` | Self-tests run by `./build.sh test` |
 | `Resources/` | `Info.plist` and the app icon |
 | `scripts/` | Draws the icon and packs it into `AppIcon.icns` |
@@ -133,7 +148,8 @@ build/Snapkeep.app/Contents/MacOS/Snapkeep --render-overlay screen.png out-dir/
   crops the selection from that frozen image, so what you see is exactly what you get.
 - Window highlighting uses `CGWindowListCopyWindowInfo`. Line snapping looks for columns or rows of
   pixels that differ from their neighbours along most of the edge being dragged.
-- Global shortcuts use Carbon `RegisterEventHotKey`, which needs no Accessibility permission.
+- Global shortcuts use Carbon `RegisterEventHotKey`, which needs no Accessibility permission. They're
+  saved in `UserDefaults` and paused while you record a new one in Settings.
 - Live Text uses VisionKit's `ImageAnalyzer` and `ImageAnalysisOverlayView`. Analysis starts as
   soon as the preview opens.
 - Drawings are stored in image pixels, so they stay in place when the window is resized. Copy and

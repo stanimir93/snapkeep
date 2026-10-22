@@ -1,6 +1,7 @@
 import AppKit
+import Carbon.HIToolbox
 
-/// Checks the parts that don't need a screen: file naming, full-resolution rendering and Live Text.
+/// Checks the parts that don't need a screen: file naming, full-resolution rendering, shortcuts and Live Text.
 @main
 @MainActor
 struct SelfTest {
@@ -70,6 +71,43 @@ struct SelfTest {
         check(snapper.snapX(84, along: 40...60) == 80, "x 84 snaps to a window edge at 80")
         snapper.isEnabled = false
         check(snapper.snapX(103.2, along: 20...130) == 103, "snapping off only rounds to the pixel grid")
+
+        print("Shortcuts")
+        let captureDefault = ShortcutAction.capture.defaultShortcut
+        check(captureDefault.displayName == "⇧⌘1", "capture defaults to ⇧⌘1")
+        check(ShortcutAction.captureText.defaultShortcut.displayName == "⇧⌘2", "capture text defaults to ⇧⌘2")
+        check(captureDefault.carbonModifiers == cmdKey | shiftKey, "⇧⌘ maps to Carbon cmdKey | shiftKey")
+        check(captureDefault.menuKeyEquivalent == "1", "menu shows the key as 1")
+        let allMods = Shortcut(keyCode: kVK_ANSI_S, modifiers: [.command, .shift, .option, .control], key: "s")
+        check(allMods.displayName == "⌃⌥⇧⌘S", "modifiers read in menu order: \(allMods.displayName)")
+        check(!Shortcut(keyCode: kVK_ANSI_A, modifiers: [.shift], key: "a").isValid, "⇧A alone is refused")
+        check(Shortcut(keyCode: kVK_F5, modifiers: [], key: "").isValid, "F5 alone is allowed")
+        check(Shortcut(keyCode: kVK_Space, modifiers: [.option], key: " ").displayName == "⌥Space", "space is named Space")
+
+        let suite = "snapkeep-selftest-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ShortcutSettings(defaults: defaults)
+        check(store.shortcut(for: .capture) == captureDefault, "unset shortcut is the default")
+        let custom = Shortcut(keyCode: kVK_ANSI_X, modifiers: [.control, .option], key: "x")
+        try? store.set(custom, for: .capture)
+        check(ShortcutSettings(defaults: defaults).shortcut(for: .capture) == custom, "a new shortcut is saved")
+        do {
+            try store.set(custom, for: .captureText)
+            check(false, "the same shortcut twice is refused")
+        } catch {
+            check(error == .duplicate(custom, .capture), "the same shortcut twice is refused")
+        }
+        do {
+            try store.set(Shortcut(keyCode: kVK_ANSI_A, modifiers: [], key: "a"), for: .captureText)
+            check(false, "a shortcut without ⌘, ⌥ or ⌃ is refused")
+        } catch {
+            check(error == .needsModifier, "a shortcut without ⌘, ⌥ or ⌃ is refused")
+        }
+        try? store.set(nil, for: .captureText)
+        check(store.shortcut(for: .captureText) == nil, "a shortcut can be turned off")
+        store.restoreDefaults()
+        check(store.shortcut(for: .capture) == captureDefault && store.shortcut(for: .captureText) != nil, "restore defaults")
 
         print("Live Text")
         check(TextRecognizer.isSupported, "ImageAnalyzer is supported")
