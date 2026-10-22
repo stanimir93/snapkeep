@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ServiceManagement
 
-/// The Settings window: the global shortcuts and Open at Login.
+/// The Settings window: the global shortcuts, sounds and Open at Login.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let window: SettingsWindow
@@ -10,6 +10,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var recorders: [ShortcutAction: ShortcutRecorder] = [:]
     private let messageLabel = NSTextField(labelWithString: "")
     private let loginCheckbox = NSButton(checkboxWithTitle: "Open Snapkeep at login", target: nil, action: nil)
+    private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds for screenshots and recordings", target: nil, action: nil)
 
     override init() {
         window = SettingsWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -68,10 +69,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let restore = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults))
         loginCheckbox.target = self
         loginCheckbox.action = #selector(toggleOpenAtLogin)
+        soundsCheckbox.target = self
+        soundsCheckbox.action = #selector(toggleSounds)
         let separator = NSBox()
         separator.boxType = .separator
 
-        let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, loginCheckbox])
+        let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, soundsCheckbox, loginCheckbox])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -100,6 +103,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             recorder.shortcut = settings.shortcut(for: action)
         }
         loginCheckbox.state = LoginItem.isEnabled ? .on : .off
+        soundsCheckbox.state = Sounds.isEnabled ? .on : .off
     }
 
     private func apply(_ shortcut: Shortcut?, to action: ShortcutAction) {
@@ -117,6 +121,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let failed = settings.restoreDefaults()
         showMessage(failed.isEmpty ? "" : "\(settings.describe(failed)) \(failed.count == 1 ? "is" : "are") used by another app.")
         refresh()
+    }
+
+    @objc private func toggleSounds() {
+        Sounds.isEnabled = soundsCheckbox.state == .on
+        // Let the user hear what they turned on.
+        Sounds.screenshot()
     }
 
     @objc private func toggleOpenAtLogin() {

@@ -169,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Saves to ~/Pictures/Screenshots, copies, and opens a preview.
     private func keepCapture(_ capture: CaptureSession.Capture) {
+        Sounds.screenshot()
         guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
             Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
             return
@@ -189,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Copy & Close: the image goes to the clipboard only. Nothing is kept on disk.
     private func copyCapture(_ capture: CaptureSession.Capture) {
+        Sounds.screenshot()
         guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
             Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
             return
@@ -259,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             // Stopped before it got going.
             guard let self, self.recorder === recorder else { return }
+            Sounds.recordingStarted()
             let controls = RecordingControls(screen: capture.screen, rect: capture.rect)
             controls.onStop = { [weak self] in self?.stopRecording() }
             controls.onDiscard = { [weak self] in self?.stopRecording(discard: true) }
@@ -274,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordingControls?.close()
         recordingControls = nil
         setRecordingIcon(false)
+        Sounds.recordingStopped()
         Task { @MainActor in
             do {
                 let recording = try await recorder.stop()

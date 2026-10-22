@@ -168,6 +168,9 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
   keys work on their own). `Esc` cancels and `Delete` turns the shortcut off. If another app already
   uses the keys, Snapkeep keeps the old shortcut and tells you. **Restore Defaults** brings back
   `⇧⌘1`, `⇧⌘2` and `⇧⌘7`.
+- **Play sounds for screenshots and recordings.** On by default. Snapkeep makes the same sounds as
+  the macOS Screenshot tool: the shutter when it takes a screenshot (not for text capture), and the
+  start and stop chimes for a recording. Turn it off for silent captures.
 - **Open Snapkeep at login.** The same switch as **Open at Login** in the menu.
 
 ## Development
