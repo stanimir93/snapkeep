@@ -33,6 +33,7 @@ In a preview:
 | `⌘S` | Save the image with drawings back to its file |
 | `⌘Z` | Undo the last drawing |
 | `⌘W` | Close the preview |
+| `⌘⌫` | Move the screenshot to the Trash and close the preview |
 | `Return` | Copy the image |
 | `V` `P` `H` `A` `R` `T` | Select text, Pen, Highlighter, Arrow, Rectangle, Text |
 | `Esc` | Clear the text selection |

@@ -173,7 +173,7 @@ final class PreviewController: NSObject, NSWindowDelegate {
         swatchRow.spacing = 2
 
         undoButton = iconButton("arrow.uturn.backward", fallback: "Undo", tip: "Undo (⌘Z)", action: #selector(undo))
-        clearButton = iconButton("trash", fallback: "Clear", tip: "Clear all drawings", action: #selector(clearDrawings))
+        clearButton = iconButton("eraser", fallback: "Clear", tip: "Clear all drawings", action: #selector(clearDrawings))
 
         let bar = NSStackView(views: [toolPicker, swatchRow, flexibleSpace(), undoButton, clearButton])
         bar.spacing = 12
@@ -196,6 +196,7 @@ final class PreviewController: NSObject, NSWindowDelegate {
         copyTextButton = textButton("Copy Text", symbol: "text.viewfinder", tip: "Copy all the text in the screenshot", action: #selector(copyAllText))
         let saveButton = textButton("Save", symbol: "square.and.arrow.down", tip: "Save the drawings into the file (⌘S)", action: #selector(save))
         let finderButton = textButton("Show in Finder", symbol: "folder", tip: url.path, action: #selector(showInFinder))
+        let deleteButton = textButton("Delete", symbol: "trash", tip: "Move the screenshot to the Trash (⌘⌫)", action: #selector(deleteScreenshot))
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.textColor = .secondaryLabelColor
@@ -204,7 +205,7 @@ final class PreviewController: NSObject, NSWindowDelegate {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
 
-        let bar = NSStackView(views: [copyButton, copyTextButton, saveButton, finderButton, statusLabel])
+        let bar = NSStackView(views: [copyButton, copyTextButton, saveButton, finderButton, deleteButton, statusLabel])
         bar.spacing = 8
         bar.setCustomSpacing(14, after: copyButton)
         bar.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
@@ -430,6 +431,21 @@ final class PreviewController: NSObject, NSWindowDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    /// Moves the file to the Trash, so a wrong delete can be put back from there, and closes the preview.
+    @objc private func deleteScreenshot() {
+        canvas.commitText()
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            } catch {
+                flash("Couldn't delete: \(error.localizedDescription)")
+                return
+            }
+        }
+        Toast.show("Moved to Trash", detail: url.lastPathComponent, symbol: "trash")
+        close()
+    }
+
     // MARK: Keys
 
     private func handleKey(_ event: NSEvent) -> Bool {
@@ -450,6 +466,10 @@ final class PreviewController: NSObject, NSWindowDelegate {
             case "w":
                 close()
             default:
+                if event.keyCode == 51, !typing { // ⌘⌫, as in Finder
+                    deleteScreenshot()
+                    return true
+                }
                 return false
             }
             return true
