@@ -1,7 +1,17 @@
 import AppKit
+import VisionKit
 
 enum CaptureMode {
-    case image, text
+    case image, text, record
+
+    /// The confirm button's title and symbol.
+    var action: (title: String, symbol: String) {
+        switch self {
+        case .image: ("Capture", "camera.fill")
+        case .text: ("Copy Text", "text.viewfinder")
+        case .record: ("Record", "record.circle")
+        }
+    }
 }
 
 final class CaptureOverlayWindow: NSPanel {
@@ -19,6 +29,7 @@ private final class DrawingView: NSView {
 
 /// One screen's capture overlay: the frozen screen, dimmed, with guide lines, window highlighting,
 /// an adjustable selection and a Capture button. Nothing is captured until the user confirms.
+/// In text mode, Select Text turns the selection into Live Text, so part of it can be copied.
 @MainActor
 final class CaptureOverlayView: NSView {
     private struct Edges: OptionSet {
@@ -39,13 +50,19 @@ final class CaptureOverlayView: NSView {
     let mode: CaptureMode
     var onBeginInteraction: (() -> Void)?
     var onConfirm: (() -> Void)?
+    /// Copy & Close: copy the selection without a preview or a file. Image mode only.
+    var onCopy: (() -> Void)?
     var onCancel: (() -> Void)?
     var onToggleSnapping: (() -> Void)?
+    /// Select Text: the text to copy. Text mode only. The overlay stays open, so several pieces
+    /// can be copied one after another. Copy Text goes through onConfirm and closes.
+    var onCopyText: ((String) -> Void)?
 
     private var snapper: Snapper
     private let windows: [WindowInfo]
     private(set) var selection: CGRect? {
         didSet {
+            if selection != oldValue { copiedNotice = nil }
             layoutActionBar()
             redraw()
         }
@@ -59,7 +76,18 @@ final class CaptureOverlayView: NSView {
     private let backdrop = NSImageView()
     private let chrome = DrawingView()
     private let actionBar = DrawingView()
+    private var actionStack: NSStackView?
     private var trackingArea: NSTrackingArea?
+
+    /// The selection as Live Text, after Select Text.
+    private var textPicker: (imageView: NSImageView, overlay: ImageAnalysisOverlayView)?
+    private var textPickerStatus = ""
+    private var transcript = ""
+    private var copyTextButton: ColorButton?
+    private var analysisTask: Task<Void, Never>?
+    private var isPickingText: Bool { textPicker != nil }
+    /// "Copied …", shown above the selection after a Select Text copy until it changes.
+    private var copiedNotice: String?
 
     private var isCreating: Bool {
         if case .creating = drag, didDrag { return true }
@@ -96,6 +124,7 @@ final class CaptureOverlayView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         if !actionBar.isHidden, let hit = actionBar.hitTest(convert(point, from: superview)) { return hit }
+        if let picker = textPicker, let hit = picker.imageView.hitTest(convert(point, from: superview)) { return hit }
         return frame.contains(point) ? self : nil
     }
 
@@ -121,6 +150,7 @@ final class CaptureOverlayView: NSView {
     }
 
     func clearSelection() {
+        stopPickingText()
         drag = nil
         selection = nil
         mouse = nil
@@ -181,6 +211,11 @@ final class CaptureOverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = location(of: event)
+        if isPickingText {
+            // Inside the area the Live Text view takes the clicks. Outside it, start over.
+            guard let selection, !selection.contains(point) else { return }
+            stopPickingText()
+        }
         onBeginInteraction?()
         window?.makeFirstResponder(self)
         downPoint = point
@@ -205,6 +240,7 @@ final class CaptureOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !isPickingText else { return }
         let raw = location(of: event)
         let point = clamped(raw)
         let snap = activeSnapper(event)
@@ -242,6 +278,7 @@ final class CaptureOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard !isPickingText else { return }
         let point = location(of: event)
         if case .creating = drag, !didDrag {
             // A click without a drag picks the window under the pointer.
@@ -260,6 +297,19 @@ final class CaptureOverlayView: NSView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        if isPickingText {
+            switch event.keyCode {
+            case 53: // Esc
+                onCancel?()
+            case 36, 76: // Return, Enter
+                copyPickedText()
+            case 8 where event.modifierFlags.contains(.command): // ⌘C
+                copyPickedText()
+            default:
+                super.keyDown(with: event)
+            }
+            return
+        }
         switch event.keyCode {
         case 53: // Esc
             onCancel?()
@@ -267,6 +317,10 @@ final class CaptureOverlayView: NSView {
             if selection != nil { onConfirm?() }
         case 48: // Tab
             onToggleSnapping?()
+        case 8 where mode == .image && event.modifierFlags.contains(.command): // ⌘C
+            if selection != nil { onCopy?() }
+        case 8 where mode == .text && event.modifierFlags.contains(.command): // ⌘C
+            if selection != nil { onConfirm?() }
         case 123, 124, 125, 126: // arrows
             nudge(event)
         default:
@@ -307,6 +361,14 @@ final class CaptureOverlayView: NSView {
     }
 
     private func updateCursor(at point: CGPoint) {
+        if !actionBar.isHidden, drag == nil, actionBar.frame.contains(point) {
+            NSCursor.arrow.set()
+            return
+        }
+        if isPickingText {
+            (selection?.contains(point) == true ? NSCursor.iBeam : NSCursor.arrow).set()
+            return
+        }
         if let selection, drag == nil {
             let edges = edges(at: point, in: selection)
             if !edges.isEmpty {
@@ -357,11 +419,14 @@ final class CaptureOverlayView: NSView {
         NSColor.black.withAlphaComponent(0.45).setFill()
         dim.fill()
 
-        if let selection {
+        if let selection, isPickingText {
+            drawBorder(selection, color: .white, width: 1)
+            drawLabel(copiedNotice ?? textPickerStatus, above: selection)
+        } else if let selection {
             if drag != nil { drawGuides(along: selection) }
             drawBorder(selection, color: .white, width: 1)
             if !isCreating { drawHandles(selection) }
-            drawLabel(sizeText(selection), above: selection)
+            drawLabel(copiedNotice ?? sizeText(selection), above: selection)
         } else if let hovered {
             drawBorder(hovered.frame, color: .controlAccentColor, width: 3)
             let title = hovered.owner.isEmpty ? sizeText(hovered.frame) : "\(hovered.owner)   \(sizeText(hovered.frame))"
@@ -452,8 +517,8 @@ final class CaptureOverlayView: NSView {
     }
 
     private func drawHint() {
-        let action = mode == .text ? "Copy text" : "Capture"
-        var text = "\(action): drag an area or click a window  ·  F full screen  ·  Tab snapping  ·  ⌥ drag without snapping  ·  Esc cancel"
+        var text = "\(mode.action.title): drag an area or click a window  ·  F full screen  ·  Tab snapping  ·  ⌥ drag without snapping  ·  Esc cancel"
+        if mode == .image { text = text.replacingOccurrences(of: "  ·  Esc cancel", with: "  ·  ⌘C copy and close  ·  Esc cancel") }
         if !snapper.isEnabled { text += "  ·  Snapping off" }
         let string = NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
@@ -470,27 +535,59 @@ final class CaptureOverlayView: NSView {
     // MARK: Action bar
 
     private func buildActionBar() {
-        let primary = NSButton(title: mode == .text ? "Copy Text" : "Capture", target: self, action: #selector(confirmClicked))
-        primary.image = NSImage(systemSymbolName: mode == .text ? "text.viewfinder" : "camera.fill", accessibilityDescription: nil)
-        primary.imagePosition = .imageLeading
-        primary.controlSize = .large
-        primary.keyEquivalent = "\r"
-        primary.font = .systemFont(ofSize: NSFont.systemFontSize(for: .large), weight: .semibold)
-
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelClicked))
-        cancel.controlSize = .large
-
-        let stack = NSStackView(views: [cancel, primary])
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
         // Solid, so the screenshot behind doesn't show through the buttons.
         actionBar.drawHandler = { [unowned actionBar] in
             NSColor(white: 0.12, alpha: 0.94).setFill()
             NSBezierPath(roundedRect: actionBar.bounds, xRadius: 12, yRadius: 12).fill()
         }
         actionBar.appearance = NSAppearance(named: .darkAqua)
+        actionBar.isHidden = true
+        addSubview(actionBar)
+
+        switch mode {
+        case .image:
+            // Capture in blue in the middle, Copy & Close in orange at the right.
+            // Return and double-click capture (see keyDown and mouseDown).
+            let capture = ColorButton(title: mode.action.title, symbol: mode.action.symbol, color: .controlAccentColor,
+                                      target: self, action: #selector(confirmClicked))
+            capture.toolTip = "Capture and open a preview (Return)"
+            let copy = ColorButton(title: "Copy & Close", symbol: "doc.on.doc", color: .systemOrange,
+                                   target: self, action: #selector(copyClicked))
+            copy.toolTip = "Copy to the clipboard, without a preview or a file (⌘C)"
+            setActionButtons([cancelButton(), capture, copy])
+        case .text:
+            // The same layout: copy everything in blue, pick part of the text in orange.
+            let copy = ColorButton(title: mode.action.title, symbol: mode.action.symbol, color: .controlAccentColor,
+                                   target: self, action: #selector(confirmClicked))
+            copy.toolTip = "Copy all the text in the area and close (Return)"
+            let select = ColorButton(title: "Select Text", symbol: "character.cursor.ibeam", color: .systemOrange,
+                                     target: self, action: #selector(selectTextClicked))
+            select.toolTip = "Select text right here and copy it, as many pieces as you like"
+            setActionButtons([cancelButton(), copy, select])
+        case .record:
+            let primary = NSButton(title: mode.action.title, target: self, action: #selector(confirmClicked))
+            primary.image = NSImage(systemSymbolName: mode.action.symbol, accessibilityDescription: nil)
+            primary.imagePosition = .imageLeading
+            primary.controlSize = .large
+            primary.keyEquivalent = "\r"
+            primary.font = .systemFont(ofSize: NSFont.systemFontSize(for: .large), weight: .semibold)
+            setActionButtons([cancelButton(), primary])
+        }
+    }
+
+    private func cancelButton() -> NSButton {
+        // Select Text copies without closing, so its way out is Done rather than Cancel.
+        let cancel = NSButton(title: isPickingText ? "Done" : "Cancel", target: self, action: #selector(cancelClicked))
+        cancel.controlSize = .large
+        return cancel
+    }
+
+    private func setActionButtons(_ buttons: [NSButton]) {
+        actionStack?.removeFromSuperview()
+        let stack = NSStackView(views: buttons)
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        stack.translatesAutoresizingMaskIntoConstraints = false
         actionBar.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: actionBar.leadingAnchor),
@@ -498,9 +595,9 @@ final class CaptureOverlayView: NSView {
             stack.topAnchor.constraint(equalTo: actionBar.topAnchor),
             stack.bottomAnchor.constraint(equalTo: actionBar.bottomAnchor),
         ])
+        actionStack = stack
         actionBar.setFrameSize(stack.fittingSize)
-        actionBar.isHidden = true
-        addSubview(actionBar)
+        if !actionBar.isHidden { layoutActionBar() }
     }
 
     /// Puts the buttons under the selection's right edge, or above it, or inside it if the
@@ -528,6 +625,99 @@ final class CaptureOverlayView: NSView {
         onConfirm?()
     }
 
+    /// Hands the text over to be copied and says so above the area.
+    private func copied(_ text: String) {
+        onCopyText?(text)
+        let firstLine = text.split(separator: "\n").first.map(String.init) ?? text
+        let preview = firstLine.count > 40 ? firstLine.prefix(40) + "…" : firstLine
+        copiedNotice = "Copied “\(preview)” · Esc to finish"
+        redraw()
+    }
+
+    @objc private func copyClicked() {
+        onCopy?()
+    }
+
+    // MARK: Select Text
+
+    @objc private func selectTextClicked() {
+        startPickingText()
+    }
+
+    /// Lays the selected part of the frozen screen over itself as Live Text. It looks the same,
+    /// but now its text can be selected.
+    private func startPickingText() {
+        guard textPicker == nil, let selection, let captured = capturedImage() else { return }
+        copiedNotice = nil
+        onBeginInteraction?()
+        hovered = nil
+        let imageView = NSImageView(frame: selection)
+        imageView.image = NSImage(cgImage: captured.image, size: selection.size)
+        imageView.imageScaling = .scaleAxesIndependently
+        imageView.isEditable = false
+        imageView.unregisterDraggedTypes()
+        let overlay = ImageAnalysisOverlayView(frame: imageView.bounds)
+        overlay.autoresizingMask = [.width, .height]
+        overlay.preferredInteractionTypes = .textSelection
+        overlay.isSupplementaryInterfaceHidden = true
+        overlay.delegate = self
+        imageView.addSubview(overlay)
+        overlay.trackingImageView = imageView
+        addSubview(imageView, positioned: .below, relativeTo: actionBar)
+        textPicker = (imageView, overlay)
+
+        let copy = ColorButton(title: "Copy All Text", symbol: "doc.on.doc", color: .controlAccentColor,
+                               target: self, action: #selector(copyPickedText))
+        copy.toolTip = "Copy the selected text, or all of it if none is selected (Return, ⌘C)"
+        copy.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        copyTextButton = copy
+        setActionButtons([cancelButton(), copy])
+        textPickerStatus = "Finding text…"
+        redraw()
+
+        let image = captured.image
+        analysisTask = Task { @MainActor [weak self] in
+            let status: String
+            do {
+                let analysis = try await TextRecognizer.analyze(image)
+                guard let self, !Task.isCancelled, let picker = self.textPicker else { return }
+                picker.overlay.analysis = analysis
+                self.transcript = analysis.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                status = self.transcript.isEmpty ? "No text found" : "Drag across the text you want"
+            } catch {
+                status = "Text recognition failed"
+            }
+            self?.textPickerStatus = status
+            self?.redraw()
+        }
+    }
+
+    private func stopPickingText() {
+        guard let picker = textPicker else { return }
+        analysisTask?.cancel()
+        analysisTask = nil
+        copiedNotice = nil
+        picker.imageView.removeFromSuperview()
+        textPicker = nil
+        transcript = ""
+        copyTextButton = nil
+        actionBar.isHidden = true
+        buildActionBar()
+    }
+
+    @objc private func copyPickedText() {
+        guard let picker = textPicker else { return }
+        let selected = picker.overlay.hasActiveTextSelection ? picker.overlay.selectedText : ""
+        let text = selected.isEmpty ? transcript : selected
+        guard !text.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        copied(text)
+        // Clear the highlight, so the next piece starts fresh.
+        picker.overlay.resetSelection()
+    }
+
     @objc private func cancelClicked() {
         onCancel?()
     }
@@ -541,11 +731,73 @@ final class CaptureOverlayView: NSView {
         self.selection = selection
     }
 
+    /// Starts Select Text and waits for Live Text, for the self-check render.
+    func startPickingTextForCheck() async {
+        startPickingText()
+        await analysisTask?.value
+    }
+
+    /// Copies as Return would after Select Text, for the self-check render.
+    func copyPickedTextForCheck() {
+        copyPickedText()
+    }
+
     /// Runs the snapping a drag from `start` to `end` would get.
     func snappedDragForCheck(from start: CGPoint, to end: CGPoint) -> CGRect {
         let anchor = snapper.snapPoint(start)
         let x = snapper.snapX(end.x, along: min(anchor.y, end.y)...max(anchor.y, end.y))
         let y = snapper.snapY(end.y, along: min(anchor.x, end.x)...max(anchor.x, end.x))
         return CGRect(x: min(anchor.x, x), y: min(anchor.y, y), width: abs(x - anchor.x), height: abs(y - anchor.y))
+    }
+}
+
+/// A push button with white text on a colour, like a default button, since macOS ignores
+/// bezelColor on dark HUD buttons.
+final class ColorButton: NSButton {
+    let color: NSColor
+
+    init(title: String, symbol: String, color: NSColor, target: AnyObject?, action: Selector) {
+        self.color = color
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        imagePosition = .imageLeading
+        imageHugsTitle = true
+        controlSize = .large
+        isBordered = false
+        contentTintColor = .white
+        setTitle(title)
+    }
+
+    func setTitle(_ title: String) {
+        self.title = title
+        attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .large), weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: NSSize {
+        let size = super.intrinsicContentSize
+        return NSSize(width: size.width + 20, height: 28)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        (isHighlighted ? color.blended(withFraction: 0.2, of: .black) ?? color : color).setFill()
+        // The same height as the system buttons beside it.
+        let pill = bounds.insetBy(dx: 0, dy: max(0, (bounds.height - 26) / 2))
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        super.draw(dirtyRect)
+    }
+}
+
+extension CaptureOverlayView: ImageAnalysisOverlayViewDelegate {
+    func textSelectionDidChange(_ overlayView: ImageAnalysisOverlayView) {
+        let hasSelection = overlayView.hasActiveTextSelection && !overlayView.selectedText.isEmpty
+        copyTextButton?.setTitle(hasSelection ? "Copy Selection" : "Copy All Text")
     }
 }

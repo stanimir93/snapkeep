@@ -69,11 +69,13 @@ struct Shortcut: Codable, Equatable {
 enum ShortcutAction: String, CaseIterable {
     case capture
     case captureText
+    case record
 
     var title: String {
         switch self {
         case .capture: "Capture"
         case .captureText: "Capture Text"
+        case .record: "Record Screen"
         }
     }
 
@@ -81,6 +83,8 @@ enum ShortcutAction: String, CaseIterable {
         switch self {
         case .capture: Shortcut(keyCode: kVK_ANSI_1, modifiers: [.shift, .command], key: "1")
         case .captureText: Shortcut(keyCode: kVK_ANSI_2, modifiers: [.shift, .command], key: "2")
+        // ⇧⌘3 to ⇧⌘6 belong to macOS's own screenshot tools.
+        case .record: Shortcut(keyCode: kVK_ANSI_7, modifiers: [.shift, .command], key: "7")
         }
     }
 }

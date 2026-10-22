@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ServiceManagement
 
-/// The Settings window: the two global shortcuts and Open at Login.
+/// The Settings window: the global shortcuts and Open at Login.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let window: SettingsWindow

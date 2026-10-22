@@ -1,7 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
+import ImageIO
 
-/// Checks the parts that don't need a screen: file naming, full-resolution rendering, shortcuts and Live Text.
+/// Checks the parts that don't need a screen: file naming, full-resolution rendering, shortcuts,
+/// GIF export and Live Text.
 @main
 @MainActor
 struct SelfTest {
@@ -30,6 +32,7 @@ struct SelfTest {
         check(FileManager.default.fileExists(atPath: library.folder.path), "creates the folder")
         check(second.lastPathComponent == "screenshot-2026-03-07_09-05-02-2.png", "same-second capture gets -2")
         check(library.newest()?.resolvingSymlinksInPath().path == first.resolvingSymlinksInPath().path, "finds the newest screenshot: \(library.newest()?.lastPathComponent ?? "none")")
+        check(ScreenshotLibrary.fileName(for: date, prefix: "recording", extension: "gif") == "recording-2026-03-07_09-05-02.gif", "recordings are named recording-…")
 
         print("Rendering")
         let sampleURL = dir.appendingPathComponent("sample.png")
@@ -76,6 +79,7 @@ struct SelfTest {
         let captureDefault = ShortcutAction.capture.defaultShortcut
         check(captureDefault.displayName == "⇧⌘1", "capture defaults to ⇧⌘1")
         check(ShortcutAction.captureText.defaultShortcut.displayName == "⇧⌘2", "capture text defaults to ⇧⌘2")
+        check(ShortcutAction.record.defaultShortcut.displayName == "⇧⌘7", "record defaults to ⇧⌘7")
         check(captureDefault.carbonModifiers == cmdKey | shiftKey, "⇧⌘ maps to Carbon cmdKey | shiftKey")
         check(captureDefault.menuKeyEquivalent == "1", "menu shows the key as 1")
         let allMods = Shortcut(keyCode: kVK_ANSI_S, modifiers: [.command, .shift, .option, .control], key: "s")
@@ -109,6 +113,63 @@ struct SelfTest {
         store.restoreDefaults()
         check(store.shortcut(for: .capture) == captureDefault && store.shortcut(for: .captureText) != nil, "restore defaults")
 
+        print("Sizes")
+        check(fitting(CGSize(width: 2560, height: 1440), long: 1920, short: 1080) == CGSize(width: 1920, height: 1080), "a 1440p area fits 1920 × 1080")
+        check(fitting(CGSize(width: 900, height: 2400), long: 1920, short: 1080) == CGSize(width: 720, height: 1920), "a tall area keeps its shape: 900 × 2400 → 720 × 1920")
+        check(fitting(CGSize(width: 640, height: 400), long: 1920, short: 1080) == CGSize(width: 640, height: 400), "a small area is never scaled up")
+        let screen = CGSize(width: 1512, height: 982)
+        check(GIFExporter.outputSize(for: screen, preset: .full) == screen, "Full GIFs use points, not 2x pixels")
+        check(GIFExporter.outputSize(for: screen, preset: .medium) == CGSize(width: 1232, height: 800), "a Medium GIF of the screen is 1232 × 800")
+        check(GIFExporter.outputSize(for: screen, preset: .small) == CGSize(width: 800, height: 520), "a Small GIF of the screen is 800 × 520")
+        check(GIFExporter.outputSize(for: CGSize(width: 640, height: 400), preset: .small) == CGSize(width: 640, height: 400), "no preset scales a small area up")
+        check(ScreenRecorder.evenSize(CGSize(width: 1001, height: 603)) == CGSize(width: 1002, height: 604), "video sizes are even")
+        check(formatDuration(7.9) == "0:07" && formatDuration(83) == "1:23" && formatDuration(3723) == "1:02:03", "durations read 0:07, 1:23, 1:02:03")
+
+        print("GIF")
+        checkGIFEncoder(in: dir)
+        do {
+            let video = dir.appendingPathComponent("test.mp4")
+            let duration = try await TestVideo.write(to: video, pixelSize: CGSize(width: 1280, height: 800), seconds: 2)
+            let gifURL = dir.appendingPathComponent("test.gif")
+            let started = Date()
+            let bytes = try await GIFExporter.export(video: video, pointSize: CGSize(width: 640, height: 400), preset: .full, to: gifURL) { _ in }
+            let seconds = Date().timeIntervalSince(started)
+            let source = CGImageSourceCreateWithURL(gifURL as CFURL, nil)!
+            let frames = CGImageSourceGetCount(source)
+            let firstFrame = CGImageSourceCreateImageAtIndex(source, 0, nil)!
+            check(firstFrame.width == 640 && firstFrame.height == 400, "2x video becomes a 640 × 400 GIF: \(firstFrame.width) × \(firstFrame.height)")
+            check((14...16).contains(frames), "1 s of motion at 15 fps, then one long still frame: \(frames) frames")
+            check(abs(gifDuration(source) - duration) < 0.05, "GIF lasts as long as the video, still end included: \(gifDuration(source)) s")
+            let last = CGImageSourceCreateImageAtIndex(source, frames - 1, nil)!
+            let square = pixel(last, x: 600, y: 60)
+            check(square.b > 200 && square.r < 80, "the last frame shows the square at the right: \(square)")
+            check(bytes < 200_000, "GIF is small: \(bytes / 1000) KB in \(String(format: "%.2f", seconds)) s")
+            let estimate = try await GIFExporter.estimate(video: video, pointSize: CGSize(width: 640, height: 400), preset: .full)
+            check(estimate == bytes, "a short recording's estimate is exact: \(estimate) bytes")
+
+            let smallURL = dir.appendingPathComponent("test-small.gif")
+            _ = try await GIFExporter.export(video: video, pointSize: CGSize(width: 640, height: 400), preset: .small, to: smallURL) { _ in }
+            let smallFrames = CGImageSourceGetCount(CGImageSourceCreateWithURL(smallURL as CFURL, nil)!)
+            check((9...11).contains(smallFrames), "Small runs at 10 fps: \(smallFrames) frames")
+
+            // A longer recording is sampled.
+            let long = dir.appendingPathComponent("long.mp4")
+            let point = CGSize(width: 1512, height: 982)
+            _ = try await TestVideo.write(to: long, pixelSize: CGSize(width: 3024, height: 1964), seconds: 12)
+            for preset in GIFPreset.allCases {
+                let estimateStarted = Date()
+                let guess = try await GIFExporter.estimate(video: long, pointSize: point, preset: preset)
+                let estimateSeconds = Date().timeIntervalSince(estimateStarted)
+                let actual = try await GIFExporter.export(video: long, pointSize: point, preset: preset,
+                                                          to: dir.appendingPathComponent("long-\(preset.rawValue).gif")) { _ in }
+                let error = Double(guess - actual) / Double(actual)
+                check(abs(error) < 0.35, String(format: "%@: estimate %d KB, actual %d KB (%+.0f%%) in %.2f s",
+                                                preset.title, guess / 1000, actual / 1000, error * 100, estimateSeconds))
+            }
+        } catch {
+            check(false, "video to GIF threw \(error)")
+        }
+
         print("Live Text")
         check(TextRecognizer.isSupported, "ImageAnalyzer is supported")
         let started = Date()
@@ -122,6 +183,59 @@ struct SelfTest {
 
         print(failures == 0 ? "All checks passed" : "\(failures) check(s) failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    /// Three frames: grey, a red square over it, then the same again with a little noise that
+    /// should count as unchanged.
+    static func checkGIFEncoder(in dir: URL) {
+        let width = 64, height = 48
+        func frame(square: Bool, noise: Int = 0) -> [UInt8] {
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let p = (y * width + x) * 4
+                    let inSquare = square && (10..<30).contains(x) && (8..<24).contains(y)
+                    let (r, g, b) = inSquare ? (220, 30, 40) : (128, 128, 128)
+                    let n = (x + y) % 2 == 0 ? noise : -noise
+                    pixels[p] = UInt8(b + n); pixels[p + 1] = UInt8(g + n); pixels[p + 2] = UInt8(r + n); pixels[p + 3] = 255
+                }
+            }
+            return pixels
+        }
+        var histogram = GIFPalette.Histogram()
+        let frames = [frame(square: false), frame(square: true), frame(square: true, noise: 3)]
+        frames.forEach { f in f.withUnsafeBufferPointer { histogram.add(bgra: $0) } }
+        let palette = GIFPalette(histogram: histogram)
+        let entries = palette.red.indices.map { (Int(palette.red[$0]), Int(palette.green[$0]), Int(palette.blue[$0])) }
+        check(entries.contains { $0 == (128, 128, 128) } && entries.contains { $0 == (220, 30, 40) },
+              "palette keeps the exact grey and red: \(entries.count) colours")
+        let encoder = GIFEncoder(width: width, height: height, palette: palette)
+        for (i, f) in frames.enumerated() {
+            f.withUnsafeBufferPointer { encoder.add(bgra: $0, at: Double(i) * 0.5) }
+        }
+        let data = encoder.finish(at: 1.5)
+        let url = dir.appendingPathComponent("encoder.gif")
+        try? data.write(to: url)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else {
+            check(false, "ImageIO reads the GIF")
+            return
+        }
+        check(CGImageSourceGetCount(source) == 2, "noise-only frame is dropped: \(CGImageSourceGetCount(source)) frames")
+        check(abs(gifDuration(source) - 1.5) < 0.01, "frame times add up to 1.5 s: \(gifDuration(source))")
+        let second = CGImageSourceCreateImageAtIndex(source, 1, nil)!
+        let red = pixel(second, x: 20, y: height - 16), grey = pixel(second, x: 50, y: 40)
+        check(red.r > 200 && red.g < 60, "second frame draws the square: \(red)")
+        check(abs(grey.r - 128) < 4 && abs(grey.b - 128) < 4, "and keeps the grey from the first frame: \(grey)")
+        // Header, 256-colour table and loop block: 800 bytes. A full 64 × 48 frame of noise would be about 3 KB.
+        check(data.count - 800 < 200, "both frames take \(data.count - 800) bytes after the header")
+    }
+
+    static func gifDuration(_ source: CGImageSource) -> Double {
+        (0..<CGImageSourceGetCount(source)).reduce(0) { total, index in
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            return total + (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double ?? gif?[kCGImagePropertyGIFDelayTime] as? Double ?? 0)
+        }
     }
 
     /// Black text on white, the shape of a typical screenshot.

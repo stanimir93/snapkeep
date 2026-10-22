@@ -25,4 +25,11 @@ enum Clipboard {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
+
+    /// The file itself, so pasting into Finder, Mail or a chat app attaches it.
+    static func copyFile(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+    }
 }

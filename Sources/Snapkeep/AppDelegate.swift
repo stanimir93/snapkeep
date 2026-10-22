@@ -6,10 +6,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var session: CaptureSession?
     private var previews: [PreviewController] = []
     private var lastScreenshot: URL?
+    private var recorder: ScreenRecorder?
+    private var recordingControls: RecordingControls?
+    private var recordingPreviews: [RecordingPreviewController] = []
 
     private var statusItem: NSStatusItem!
     private var captureItem: NSMenuItem!
     private var captureTextItem: NSMenuItem!
+    private var recordItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var permissionItem: NSMenuItem!
     private lazy var settingsWindow = SettingsWindowController()
@@ -21,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-overlay") {
             runOverlayCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
+            return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--render-recording") {
+            runRecordingCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
             return
         }
         if let index = CommandLine.arguments.firstIndex(of: "--render-settings") {
@@ -50,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(captureItem)
         captureTextItem = item("Capture Text", action: #selector(captureTextFromMenu))
         menu.addItem(captureTextItem)
+        recordItem = item("Record Screen", action: #selector(recordFromMenu))
+        menu.addItem(recordItem)
         menu.addItem(.separator())
         menu.addItem(item("Show Last Screenshot", action: #selector(showLastScreenshot)))
         menu.addItem(item("Open Screenshots Folder", action: #selector(openFolder)))
@@ -75,7 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        for (item, action) in [(captureItem!, ShortcutAction.capture), (captureTextItem!, .captureText)] {
+        recordItem.title = recorder == nil ? "Record Screen" : "Stop Recording"
+        for (item, action) in [(captureItem!, ShortcutAction.capture), (captureTextItem!, .captureText), (recordItem!, .record)] {
             let shortcut = ShortcutSettings.shared.shortcut(for: action)
             item.keyEquivalent = shortcut?.menuKeyEquivalent ?? ""
             item.keyEquivalentModifierMask = shortcut?.modifierFlags ?? []
@@ -91,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.handlers = [
             .capture: { [weak self] in self?.captureArea() },
             .captureText: { [weak self] in self?.captureText() },
+            .record: { [weak self] in self?.toggleRecording() },
         ]
         let failed = settings.register()
         NSLog("Snapkeep shortcuts: %@", failed.isEmpty ? "registered" : "failed \(settings.describe(failed))")
@@ -132,8 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.session = nil
             guard let capture else { return }
             switch mode {
-            case .image: self.keepCapture(capture)
+            case .image: capture.copyOnly ? self.copyCapture(capture) : self.keepCapture(capture)
             case .text: self.copyText(from: capture)
+            case .record: self.startRecording(capture)
             }
         }
         self.session = session
@@ -174,7 +187,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     status: "Copied to clipboard")
     }
 
-    /// Copies only the text. Nothing is kept on disk.
+    /// Copy & Close: the image goes to the clipboard only. Nothing is kept on disk.
+    private func copyCapture(_ capture: CaptureSession.Capture) {
+        guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
+            Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
+            return
+        }
+        Clipboard.copyPNG(data)
+        Toast.show("Copied to clipboard", detail: "\(capture.image.width) × \(capture.image.height)", symbol: "checkmark.circle.fill")
+    }
+
+    /// Copy Text: copies all the text in the area. Nothing is kept on disk.
     private func copyText(from capture: CaptureSession.Capture) {
         Task { @MainActor in
             do {
@@ -191,6 +214,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 Toast.show("Text recognition failed", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
             }
         }
+    }
+
+    // MARK: Recording
+
+    /// The record shortcut starts a recording, or stops the one running.
+    @objc func toggleRecording() {
+        if recorder != nil {
+            stopRecording()
+        } else {
+            startCapture(.record)
+        }
+    }
+
+    @objc private func recordFromMenu() {
+        if recorder != nil {
+            stopRecording()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.startCapture(.record) }
+        }
+    }
+
+    private func startRecording(_ capture: CaptureSession.Capture) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Snapkeep", isDirectory: true)
+        let recorder: ScreenRecorder
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            recorder = try ScreenRecorder(screen: capture.screen, rect: capture.rect,
+                                          url: folder.appendingPathComponent("recording-\(UUID().uuidString).mp4"))
+        } catch {
+            Toast.show("Couldn't start recording", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+            return
+        }
+        recorder.onInterrupted = { [weak self] in self?.stopRecording() }
+        self.recorder = recorder
+        Task { @MainActor [weak self] in
+            do {
+                try await recorder.start()
+            } catch {
+                self?.recorder = nil
+                try? FileManager.default.removeItem(at: recorder.url)
+                Toast.show("Couldn't start recording", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+                return
+            }
+            // Stopped before it got going.
+            guard let self, self.recorder === recorder else { return }
+            let controls = RecordingControls(screen: capture.screen, rect: capture.rect)
+            controls.onStop = { [weak self] in self?.stopRecording() }
+            controls.onDiscard = { [weak self] in self?.stopRecording(discard: true) }
+            controls.show()
+            self.recordingControls = controls
+            self.setRecordingIcon(true)
+        }
+    }
+
+    private func stopRecording(discard: Bool = false) {
+        guard let recorder else { return }
+        self.recorder = nil
+        recordingControls?.close()
+        recordingControls = nil
+        setRecordingIcon(false)
+        Task { @MainActor in
+            do {
+                let recording = try await recorder.stop()
+                if discard {
+                    try? FileManager.default.removeItem(at: recording.url)
+                    Toast.show("Recording discarded", symbol: "trash")
+                } else {
+                    self.openRecordingPreview(recording)
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: recorder.url)
+                if !discard {
+                    Toast.show("Couldn't finish the recording", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+                }
+            }
+        }
+    }
+
+    private func setRecordingIcon(_ recording: Bool) {
+        let icon = NSImage(systemSymbolName: recording ? "record.circle" : "camera.viewfinder", accessibilityDescription: "Snapkeep")
+        icon?.isTemplate = true
+        statusItem.button?.image = icon
+        statusItem.button?.toolTip = recording ? "Snapkeep is recording" : "Snapkeep"
+    }
+
+    @discardableResult
+    private func openRecordingPreview(_ recording: Recording) -> RecordingPreviewController {
+        let preview = RecordingPreviewController(recording: recording, library: library)
+        preview.onClose = { [weak self] closed in
+            self?.recordingPreviews.removeAll { $0 === closed }
+        }
+        preview.show(cascadeIndex: previews.count + recordingPreviews.count)
+        recordingPreviews.append(preview)
+        return preview
     }
 
     // MARK: Previews
@@ -274,6 +391,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// `Snapkeep --render-recording out-dir`: records nothing. Makes a short test video, saves it
+    /// as out-dir/check.gif, and shows the recording preview and controls for a few seconds. Their
+    /// window numbers are printed for `screencapture -l`, since the player keeps the preview
+    /// from rendering offscreen.
+    private func runRecordingCheck(arguments: [String]) {
+        guard let path = arguments.first else {
+            print("usage: Snapkeep --render-recording <output-dir>")
+            exit(2)
+        }
+        let output = URL(fileURLWithPath: path, isDirectory: true)
+        let pixelSize = CGSize(width: 1280, height: 800), pointSize = CGSize(width: 640, height: 400)
+        Task { @MainActor in
+            do {
+                let video = output.appendingPathComponent("check.mp4")
+                try? FileManager.default.removeItem(at: video)
+                let duration = try await TestVideo.write(to: video, pixelSize: pixelSize, seconds: 2)
+                let started = Date()
+                let bytes = try await GIFExporter.export(video: video, pointSize: pointSize, preset: .medium,
+                                                         to: output.appendingPathComponent("check.gif")) { _ in }
+                print(String(format: "gif %d bytes in %.2f s", bytes, Date().timeIntervalSince(started)))
+
+                let copy = output.appendingPathComponent("preview.mp4")
+                try? FileManager.default.removeItem(at: copy)
+                try FileManager.default.copyItem(at: video, to: copy)
+                let preview = openRecordingPreview(Recording(url: copy, pointSize: pointSize, pixelSize: pixelSize, duration: duration))
+                let controls = RecordingControls(screen: NSScreen.main!, rect: CGRect(x: 100, y: 100, width: 600, height: 400))
+                controls.show()
+                try await Task.sleep(for: .milliseconds(300))
+                let others = NSApp.windows.filter { $0.isVisible && $0 !== preview.panel }.map { String($0.windowNumber) }
+                print("preview window \(preview.panel.windowNumber), controls windows \(others.joined(separator: " "))")
+                fflush(stdout)
+                try await Task.sleep(for: .seconds(4))
+                exit(0)
+            } catch {
+                print("check failed: \(error)")
+                exit(1)
+            }
+        }
+    }
+
     /// `Snapkeep --render-settings out-dir`: writes the Settings window to out-dir/settings.png.
     private func runSettingsCheck(arguments: [String]) {
         guard let path = arguments.first else {
@@ -293,7 +450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// `Snapkeep --render-overlay screen.png out-dir`: draws the capture overlay over an image in a
-    /// few states (hovering a window, a finished selection) without touching the real screen.
+    /// few states (hovering a window, a finished selection, Copy Text before and after Select
+    /// Text) without touching the real screen.
     private func runOverlayCheck(arguments: [String]) {
         guard arguments.count >= 2, let screen = Screenshot.load(URL(fileURLWithPath: arguments[0])) else {
             print("usage: Snapkeep --render-overlay <screen.png> <output-dir>")
@@ -327,6 +485,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let captured = overlay.capturedImage() {
             try? Renderer.encodePNG(captured.image, pointSize: captured.pointSize)?.write(to: output.appendingPathComponent("overlay-capture.png"))
         }
-        exit(0)
+
+        // Copy Text mode, before and after Select Text.
+        let textOverlay = CaptureOverlayView(size: size, image: screen.cgImage, windows: [fakeWindow], mode: .text)
+        window.contentView = textOverlay
+        textOverlay.setStateForCheck(mouse: end, selection: snapped)
+        func renderText(_ name: String) {
+            textOverlay.layoutSubtreeIfNeeded()
+            guard let rep = textOverlay.bitmapImageRepForCachingDisplay(in: textOverlay.bounds) else { return }
+            textOverlay.cacheDisplay(in: textOverlay.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: output.appendingPathComponent(name))
+        }
+        renderText("overlay-text.png")
+        Task { @MainActor in
+            await textOverlay.startPickingTextForCheck()
+            renderText("overlay-text-picking.png")
+            textOverlay.copyPickedTextForCheck()
+            renderText("overlay-text-copied.png")
+            exit(0)
+        }
     }
 }

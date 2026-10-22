@@ -1,18 +1,24 @@
 import AppKit
 
 /// One capture: freezes every screen, shows an overlay on each, and reports the selected
-/// image when the user confirms (or nil if they cancel).
+/// area when the user confirms (or nil if they cancel).
 @MainActor
 final class CaptureSession {
     struct Capture {
         let image: CGImage
         let pointSize: CGSize
+        let screen: NSScreen
+        /// The selection in the screen's points, origin at its bottom-left.
+        let rect: CGRect
+        /// Copy & Close: copy only, no preview and no file.
+        var copyOnly = false
     }
 
     let mode: CaptureMode
     private let completion: (Capture?) -> Void
     private var windows: [CaptureOverlayWindow] = []
     private var overlays: [CaptureOverlayView] = []
+    private var screens: [NSScreen] = []
     private var snappingEnabled = true
     private var finished = false
 
@@ -52,6 +58,11 @@ final class CaptureSession {
             guard let self, let overlay else { return }
             self.confirm(overlay)
         }
+        overlay.onCopy = { [weak self, weak overlay] in
+            guard let self, let overlay else { return }
+            self.confirm(overlay, copyOnly: true)
+        }
+        overlay.onCopyText = { text in Clipboard.copyText(text) }
         overlay.onCancel = { [weak self] in self?.finish(nil) }
         overlay.onToggleSnapping = { [weak self] in self?.toggleSnapping() }
 
@@ -69,6 +80,7 @@ final class CaptureSession {
         window.orderFrontRegardless()
         windows.append(window)
         overlays.append(overlay)
+        screens.append(frozen.screen)
 
         // Finding lines takes a few tens of milliseconds on a 5K screen, so do it off the main thread.
         let image = frozen.image
@@ -91,9 +103,11 @@ final class CaptureSession {
         overlays.forEach { $0.setSnappingEnabled(snappingEnabled) }
     }
 
-    private func confirm(_ overlay: CaptureOverlayView) {
-        guard let captured = overlay.capturedImage() else { return }
-        finish(Capture(image: captured.image, pointSize: captured.pointSize))
+    private func confirm(_ overlay: CaptureOverlayView, copyOnly: Bool = false) {
+        guard let captured = overlay.capturedImage(), let selection = overlay.selection,
+              let index = overlays.firstIndex(where: { $0 === overlay }) else { return }
+        finish(Capture(image: captured.image, pointSize: captured.pointSize, screen: screens[index], rect: selection,
+                       copyOnly: copyOnly))
     }
 
     func finish(_ capture: Capture?) {
@@ -102,6 +116,7 @@ final class CaptureSession {
         windows.forEach { $0.orderOut(nil) }
         windows = []
         overlays = []
+        screens = []
         NSCursor.arrow.set()
         completion(capture)
     }

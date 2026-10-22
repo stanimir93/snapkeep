@@ -1,6 +1,7 @@
 import Foundation
 
-/// The folder where every capture is kept: ~/Pictures/Screenshots/screenshot-YYYY-MM-DD_HH-mm-ss.png
+/// The folder where every capture is kept: ~/Pictures/Screenshots/screenshot-YYYY-MM-DD_HH-mm-ss.png,
+/// and recordings as recording-YYYY-MM-DD_HH-mm-ss.mp4 or .gif.
 struct ScreenshotLibrary {
     let folder: URL
 
@@ -16,17 +17,17 @@ struct ScreenshotLibrary {
         return formatter
     }()
 
-    static func fileName(for date: Date, suffix: Int = 1) -> String {
+    static func fileName(for date: Date, prefix: String = "screenshot", extension ext: String = "png", suffix: Int = 1) -> String {
         let stamp = formatter.string(from: date)
-        return suffix > 1 ? "screenshot-\(stamp)-\(suffix).png" : "screenshot-\(stamp).png"
+        return suffix > 1 ? "\(prefix)-\(stamp)-\(suffix).\(ext)" : "\(prefix)-\(stamp).\(ext)"
     }
 
     /// A path for a new capture. Two captures in the same second get `-2`, `-3`, … appended.
-    func newFileURL(date: Date = Date()) throws -> URL {
+    func newFileURL(date: Date = Date(), prefix: String = "screenshot", extension ext: String = "png") throws -> URL {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var suffix = 1
         while true {
-            let url = folder.appendingPathComponent(Self.fileName(for: date, suffix: suffix))
+            let url = folder.appendingPathComponent(Self.fileName(for: date, prefix: prefix, extension: ext, suffix: suffix))
             if !FileManager.default.fileExists(atPath: url.path) { return url }
             suffix += 1
         }
