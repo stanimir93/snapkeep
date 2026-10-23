@@ -313,8 +313,8 @@ final class CaptureOverlayView: NSView {
         switch event.keyCode {
         case 53: // Esc
             onCancel?()
-        case 36, 76: // Return, Enter
-            if selection != nil { onConfirm?() }
+        case 36, 76: // Return, Enter. In image mode it copies and closes; Capture opens a preview.
+            if selection != nil { mode == .image ? onCopy?() : onConfirm?() }
         case 48: // Tab
             onToggleSnapping?()
         case 8 where mode == .image && event.modifierFlags.contains(.command): // ⌘C
@@ -546,14 +546,14 @@ final class CaptureOverlayView: NSView {
 
         switch mode {
         case .image:
-            // Capture in blue in the middle, Copy & Close in orange at the right.
-            // Return and double-click capture (see keyDown and mouseDown).
-            let capture = ColorButton(title: mode.action.title, symbol: mode.action.symbol, color: .controlAccentColor,
+            // Capture in orange in the middle, Copy & Close in blue at the right: blue is what
+            // Return does (see keyDown). Double-click still captures (see mouseDown).
+            let capture = ColorButton(title: mode.action.title, symbol: mode.action.symbol, color: .systemOrange,
                                       target: self, action: #selector(confirmClicked))
-            capture.toolTip = "Capture and open a preview (Return)"
-            let copy = ColorButton(title: "Copy & Close", symbol: "doc.on.doc", color: .systemOrange,
+            capture.toolTip = "Capture, save and open a preview (double-click)"
+            let copy = ColorButton(title: "Copy & Close", symbol: "doc.on.doc", color: .controlAccentColor,
                                    target: self, action: #selector(copyClicked))
-            copy.toolTip = "Copy to the clipboard, without a preview or a file (⌘C)"
+            copy.toolTip = "Copy to the clipboard, without a preview or a file (Return, ⌘C)"
             setActionButtons([cancelButton(), capture, copy])
         case .text:
             // The same layout: copy everything in blue, pick part of the text in orange.

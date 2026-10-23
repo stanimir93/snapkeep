@@ -10,9 +10,9 @@
 
 ---
 
-Every capture is copied to the clipboard, saved to `~/Pictures/Screenshots`, and opened in a
-floating preview that stays until you close it. In the preview you can select text straight from
-the image (Live Text) and draw on it.
+Press Return to copy a screenshot and get on with your work. Click **Capture** instead and it's
+also saved to `~/Pictures/Screenshots` and opened in a floating preview that stays until you close
+it. In the preview you can select text straight from the image (Live Text) and draw on it.
 
 ## Features
 
@@ -24,7 +24,7 @@ the image (Live Text) and draw on it.
   text, or all of it with Copy Text.
 - **Text-only capture.** One shortcut copies the text in an area and skips the preview. Select
   Text lets you pick parts of it on the spot, one after another, without closing.
-- **Copy & Close.** Copy an area straight to the clipboard, with no preview and no file.
+- **Copy & Close.** Return copies an area straight to the clipboard, with no preview and no file.
 - **Screen recording.** Record an area or a window, then save it as an MP4 video, a small GIF,
   or both.
 - **Your own shortcuts.** Change any of the shortcuts in Settings.
@@ -87,8 +87,8 @@ All three freeze the screen and dim it. Nothing is captured until you confirm:
 | `F` | Select the whole screen |
 | `Tab` | Turn snapping on or off |
 | `⌥` while dragging | Drag without snapping |
-| Return, double-click, **Capture** | Capture the selection (**Copy Text** or **Record** in the other modes) |
-| `⌘C`, **Copy & Close** | Copy the selection and close. No preview and no file. |
+| Double-click, **Capture** | Capture the selection, save it and open a preview (**Copy Text** or **Record** in the other modes, where Return does the same) |
+| Return, `⌘C`, **Copy & Close** | Copy the selection and close. No preview and no file. |
 | **Select Text** (`⇧⌘2` only) | Turn the area into selectable text, see below |
 | `Esc` | Cancel |
 
