@@ -42,7 +42,19 @@ it. In the preview you can select text straight from the image (Live Text) and d
 
 ## Install
 
-There is no download yet, so you build it from source. That takes about a minute.
+### Download
+
+Download the latest version from the [Snapkeep page](https://stanimir93.github.io/snapkeep/) or
+from [Releases](https://github.com/stanimir93/snapkeep/releases/latest), open the zip and drag
+Snapkeep into Applications.
+
+Snapkeep isn't notarized by Apple, so the first time you open it macOS says it can't check the
+app. Click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+Or run `xattr -dr com.apple.quarantine /Applications/Snapkeep.app` in the Terminal.
+
+### Build from source
+
+That takes about a minute.
 
 ```sh
 git clone https://github.com/stanimir93/snapkeep.git
@@ -64,7 +76,8 @@ To start Snapkeep with your Mac, choose **Open at Login** in its menu or in Sett
 
 > [!NOTE]
 > The app is signed ad hoc, so every build gets a new signature and macOS forgets the permission.
-> `./build.sh install` clears the old entry. Repeat the steps above after each rebuild.
+> `./build.sh install` clears the old entry. Repeat the steps above after each rebuild or update.
+> The bottom of the menu bar menu shows which version you have.
 
 ## Usage
 
@@ -179,7 +192,18 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
 ./build.sh            # build/Snapkeep.app, signed ad hoc
 ./build.sh install    # also replace /Applications/Snapkeep.app and launch it
 ./build.sh test       # self-tests: file names, full-resolution export, snapping, shortcuts, GIF export, Live Text
+./build.sh release    # also zip it to build/Snapkeep-<version>.zip
+./build.sh publish    # also tag v<version> and publish the zip as a GitHub release
 ```
+
+### Releasing
+
+The version is `CFBundleShortVersionString` in `Resources/Info.plist`. To release, bump it,
+commit, and run `./build.sh publish`. It pushes `main`, creates the release `v<version>` with the
+zip, and the [Pages workflow](.github/workflows/pages.yml) redeploys the
+[download page](https://stanimir93.github.io/snapkeep/) from `site/` with the new version, size
+and link. To preview the page locally, run `scripts/build-site.sh` and open
+`build/site/index.html`.
 
 To check the layout without screen access:
 
@@ -206,7 +230,8 @@ seconds. It prints their window numbers so you can grab them with `screencapture
 | `Sources/Snapkeep/` | The app: capture overlay, preview window, drawing canvas, Live Text, recording, GIF encoder, menu bar, settings |
 | `Tests/SelfTest.swift` | Self-tests run by `./build.sh test` |
 | `Resources/` | `Info.plist` and the app icon |
-| `scripts/` | Draws the icon and packs it into `AppIcon.icns` |
+| `scripts/` | Draws the icon and packs it into `AppIcon.icns`, and builds the download page |
+| `site/` | The download page, deployed to GitHub Pages |
 | `docs/original-brief.md` | The brief the first version was built from |
 
 ### How it works

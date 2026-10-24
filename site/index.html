@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snapkeep: a menu bar screenshot app for macOS</title>
+<meta name="description" content="Snapkeep keeps your screenshots on screen, on the clipboard and on disk. Select text in them, draw on them, and record your screen as MP4 or GIF. Free and open source.">
+<link rel="icon" href="icon.png">
+<meta property="og:title" content="Snapkeep">
+<meta property="og:description" content="A menu bar screenshot app for macOS that keeps your screenshots on screen, on the clipboard and on disk.">
+<meta property="og:image" content="https://stanimir93.github.io/snapkeep/icon.png">
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --muted: #5f6368;
+    --line: #e2e4e8;
+    --accent: #1f6ff2;
+    --accent-dark: #1659c9;
+    --code: #eef0f3;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111214;
+      --card: #1b1c1f;
+      --text: #f2f2f4;
+      --muted: #a1a4ab;
+      --line: #2c2e33;
+      --accent: #3d86ff;
+      --accent-dark: #2f74e8;
+      --code: #26282d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, kbd {
+    font: 0.88em ui-monospace, "SF Mono", Menlo, monospace;
+    background: var(--code);
+    border-radius: 5px;
+    padding: 2px 6px;
+  }
+  kbd { white-space: nowrap; }
+
+  .hero { text-align: center; padding: 72px 0 56px; }
+  .hero img { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(31, 111, 242, 0.3)); }
+  .hero h1 { font-size: 52px; letter-spacing: -0.02em; margin: 16px 0 8px; }
+  .hero p.tagline { font-size: 21px; color: var(--muted); max-width: 600px; margin: 0 auto 32px; }
+  .download {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--accent); color: #fff;
+    font-size: 19px; font-weight: 600;
+    padding: 14px 30px; border-radius: 999px;
+    box-shadow: 0 6px 18px rgba(31, 111, 242, 0.35);
+  }
+  .download:hover { background: var(--accent-dark); text-decoration: none; }
+  .download svg { width: 20px; height: 20px; }
+  .meta { color: var(--muted); font-size: 15px; margin-top: 16px; }
+  .meta .version { color: var(--text); font-weight: 600; }
+  .links { font-size: 15px; margin-top: 6px; }
+  .links a + a::before { content: "·"; color: var(--muted); margin: 0 10px; display: inline-block; }
+
+  section { padding: 36px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 28px; letter-spacing: -0.01em; margin: 0 0 20px; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+  .feature { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .feature h3 { font-size: 17px; margin: 0 0 6px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  ol.steps { padding-left: 22px; margin: 0; }
+  ol.steps li { margin-bottom: 14px; padding-left: 4px; }
+  ol.steps li::marker { font-weight: 600; color: var(--accent); }
+  .note { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 14px 18px; color: var(--muted); font-size: 15px; margin-top: 20px; }
+  .note strong { color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 14px; color: var(--muted); font-weight: 600; }
+  td:first-child { width: 120px; }
+
+  footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; text-align: center; padding: 28px 0 48px; }
+  footer a + a::before, footer span + a::before { content: "·"; margin: 0 10px; display: inline-block; color: var(--muted); }
+
+  @media (max-width: 600px) {
+    .hero { padding-top: 48px; }
+    .hero h1 { font-size: 40px; }
+    .hero p.tagline { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <img src="icon.png" alt="Snapkeep icon">
+    <h1>Snapkeep</h1>
+    <p class="tagline">A menu bar screenshot app for macOS that keeps your screenshots on screen, on the clipboard and on disk.</p>
+    <a class="download" href="{{DOWNLOAD_URL}}">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12"/></svg>
+      Download for Mac
+    </a>
+    <div class="meta"><span class="version">Version {{VERSION}}</span> · {{SIZE}} · {{DATE}}</div>
+    <div class="meta">macOS 14 Sonoma or later · Apple Silicon · Free and open source</div>
+    <div class="links">
+      <a href="{{NOTES_URL}}">Release notes</a><a href="https://github.com/stanimir93/snapkeep/releases">All versions</a><a href="https://github.com/stanimir93/snapkeep">Source on GitHub</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="features">
+      <div class="feature"><h3>Copied and saved</h3><p>Paste right after you capture. Every screenshot also lands in <code>~/Pictures/Screenshots</code>.</p></div>
+      <div class="feature"><h3>Previews that stay</h3><p>Each capture opens a floating window that never closes on a timer. Keep several open at once.</p></div>
+      <div class="feature"><h3>Select text in the image</h3><p>Live Text is ready as soon as the preview opens. Copy part of the text, or all of it.</p></div>
+      <div class="feature"><h3>Text-only capture</h3><p>One shortcut copies the text in an area and skips the preview and the file.</p></div>
+      <div class="feature"><h3>Screen recording</h3><p>Record an area or a window, then save it as an MP4, a small GIF, or both.</p></div>
+      <div class="feature"><h3>Quick drawing</h3><p>Pen, highlighter, arrow, rectangle and text, always on the toolbar. No editor to open.</p></div>
+      <div class="feature"><h3>Snapping selection</h3><p>The screen freezes while you select, and edges snap to windows and to the lines between panes.</p></div>
+      <div class="feature"><h3>Lightweight</h3><p>Native Swift, no dependencies, no network access. It lives in the menu bar, not the Dock.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <ol class="steps">
+      <li>Download the zip above and open it, if your browser didn't already. Drag <strong>Snapkeep</strong> into your <strong>Applications</strong> folder.</li>
+      <li>Open Snapkeep. Because it isn't notarized by Apple, macOS says it can't check the app. Click <strong>Done</strong>, then go to <strong>System Settings → Privacy &amp; Security</strong>, scroll down to the message about Snapkeep and click <strong>Open Anyway</strong>.</li>
+      <li>When Snapkeep asks for <strong>Screen Recording</strong> permission, turn it on in <strong>System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</strong>. Then quit Snapkeep from its menu and open it again.</li>
+    </ol>
+    <p>A camera icon appears in the menu bar. To start Snapkeep with your Mac, choose <strong>Open at Login</strong> in its menu.</p>
+    <div class="note">
+      <strong>Prefer the Terminal?</strong> Instead of step 2, run <code>xattr -dr com.apple.quarantine /Applications/Snapkeep.app</code>.
+      <br><strong>Updating?</strong> Replace the app in Applications with the new one. macOS asks for Screen Recording permission again after each update. Your version is shown at the bottom of the Snapkeep menu.
+    </div>
+  </section>
+
+  <section>
+    <h2>Shortcuts</h2>
+    <table>
+      <tr><th>Shortcut</th><th>Action</th></tr>
+      <tr><td><kbd>⇧⌘1</kbd></td><td>Capture an area or a window</td></tr>
+      <tr><td><kbd>⇧⌘2</kbd></td><td>Capture the text in an area and copy it</td></tr>
+      <tr><td><kbd>⇧⌘7</kbd></td><td>Record an area or a window. Press it again to stop.</td></tr>
+    </table>
+    <p>You can change them in Settings. The full guide is in the <a href="https://github.com/stanimir93/snapkeep#usage">README</a>.</p>
+  </section>
+</main>
+<footer>
+  <span>Snapkeep {{VERSION}}</span><a href="https://github.com/stanimir93/snapkeep">GitHub</a><a href="https://github.com/stanimir93/snapkeep/blob/main/LICENSE">MIT License</a><a href="https://github.com/stanimir93/snapkeep/issues">Report a problem</a>
+</footer>
+</body>
+</html>

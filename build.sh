@@ -4,13 +4,20 @@
 #   ./build.sh            build to build/Snapkeep.app
 #   ./build.sh install    build, replace /Applications/Snapkeep.app and launch it
 #   ./build.sh test       build and run the self-tests
+#   ./build.sh release    build and zip it to build/Snapkeep-<version>.zip
+#   ./build.sh publish    also tag v<version> and publish the zip as a GitHub release
+#
+# The version is CFBundleShortVersionString in Resources/Info.plist.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME=Snapkeep
 BUNDLE_ID=com.stanimir.snapkeep
+REPO=stanimir93/snapkeep
 BUILD=build
 APP="$BUILD/$APP_NAME.app"
+VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+ZIP="$BUILD/$APP_NAME-$VERSION.zip"
 TARGET=arm64-apple-macos14.0
 SWIFT_FLAGS=(-O -swift-version 5 -target "$TARGET" -sdk "$(xcrun --show-sdk-path)")
 
@@ -59,9 +66,35 @@ install_app() {
     echo "Installed and launched. Grant Screen Recording again when macOS asks."
 }
 
+zip_app() {
+    echo "==> Zipping $APP_NAME $VERSION"
+    rm -f "$ZIP"
+    ditto -c -k --keepParent "$APP" "$ZIP"
+    echo "Zipped $ZIP"
+}
+
+publish_release() {
+    local tag="v$VERSION"
+    if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+        echo "Release $tag already exists. Bump CFBundleShortVersionString in Resources/Info.plist first." >&2
+        exit 1
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Commit your changes first, so the release matches main." >&2
+        exit 1
+    fi
+    git push origin HEAD:main
+    echo "==> Publishing $tag"
+    # Publishing the release also redeploys the download page with the new version.
+    gh release create "$tag" "$ZIP" --repo "$REPO" --target "$(git rev-parse HEAD)" \
+        --title "$APP_NAME $VERSION" --generate-notes
+}
+
 case "${1:-build}" in
     build) build_app ;;
     install) build_app; install_app ;;
     test) run_tests ;;
-    *) echo "usage: $0 [build|install|test]" >&2; exit 2 ;;
+    release) build_app; zip_app ;;
+    publish) build_app; zip_app; publish_release ;;
+    *) echo "usage: $0 [build|install|test|release|publish]" >&2; exit 2 ;;
 esac
