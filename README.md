@@ -28,8 +28,9 @@ it. In the preview you can select text straight from the image (Live Text) and d
 - **Screen recording.** Record an area or a window, then save it as an MP4 video, a small GIF,
   or both.
 - **Your own shortcuts.** Change any of the shortcuts in Settings.
-- **Quick drawing.** Pen, highlighter, arrow, rectangle and text are always on the toolbar, no
-  editor to open. Copy and Save include the drawings at full resolution.
+- **Quick drawing.** Pen, highlighter, line, arrow, rectangle and text are always on the toolbar,
+  in four thicknesses, no editor to open. Grab a drawing to move it, reshape it, recolour it or
+  delete it. Copy and Save include the drawings at full resolution.
 - **Snapping selection.** The screen freezes while you select, and edges snap to windows and to
   the lines between panes.
 - **Lightweight.** Native Swift with no dependencies and no network access. It lives in the menu
@@ -120,12 +121,27 @@ In a preview:
 | --- | --- |
 | `⌘C` | Copy the selected text if any is selected, otherwise the image with drawings |
 | `⌘S` | Save the image with drawings back to its file |
-| `⌘Z` | Undo the last drawing |
+| `⌘Z` | Undo the last drawing or change |
 | `⌘W` | Close the preview |
 | `⌘⌫` | Move the screenshot to the Trash and close the preview |
 | `Return` | Copy the image |
-| `V` `P` `H` `A` `R` `T` | Select text, Pen, Highlighter, Arrow, Rectangle, Text |
-| `Esc` | Clear the text selection |
+| `V` `P` `H` `L` `A` `R` `T` | Select text, Pen, Highlighter, Line, Arrow, Rectangle, Text |
+| `[` `]` | Thinner or thicker lines (and smaller or bigger text) |
+| `Delete` | Delete the selected drawing |
+| `Esc` | Put down the selected drawing, or clear the text selection |
+
+The Line tool draws a straight line, for underlining. It straightens itself when it's within a few
+degrees of level or upright; hold `⌥` to draw it at any angle. With Line or Arrow, hold `⇧` to
+turn it in 45° steps. The menu beside the tools sets the thickness: Thin, Regular, Thick or Heavy.
+
+To change a drawing, click it with Select text, Line, Arrow, Rectangle or Text (Pen and
+Highlighter always draw, so you can draw over other drawings). The selected drawing shows round
+handles, or a dashed outline if it can only be moved:
+
+- Drag it to move it.
+- Drag a handle to reshape it: either end of a line or an arrow, a corner or an edge of a rectangle.
+- Pick a colour or a thickness to change it.
+- Press `Delete` to delete it, or click anywhere else to put it down.
 
 ### Recording
 

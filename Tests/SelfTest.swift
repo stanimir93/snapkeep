@@ -60,6 +60,73 @@ struct SelfTest {
         let untouched = pixel(rendered.cgImage, x: 1550, y: 380)
         check(untouched.r > 245 && untouched.g > 245 && untouched.b > 245, "undrawn area stays white: \(untouched)")
 
+        print("Drawings")
+        let underline = Annotation.line(from: CGPoint(x: 100, y: 300), to: CGPoint(x: 500, y: 300), color: .systemBlue, width: 8)
+        let lined = Screenshot.load(writePNG(Renderer.pngData(base: shot.cgImage, pointSize: shot.pointSize, annotations: [underline])!, in: dir))!
+        let ink = pixel(lined.cgImage, x: 300, y: 300)
+        check(ink.b > 200 && ink.r < 80, "a line renders in its colour: \(ink)")
+        check(underline.distance(to: CGPoint(x: 300, y: 306)) <= 2, "a click just off a line is on it")
+        check(underline.distance(to: CGPoint(x: 300, y: 330)) > 20, "a click 30 px away misses it")
+        let box = Annotation.rectangle(CGRect(x: 100, y: 100, width: 200, height: 100), color: .systemRed, width: 4)
+        check(box.distance(to: CGPoint(x: 200, y: 150)) > 40, "the inside of a rectangle isn't part of it")
+        check(box.distance(to: CGPoint(x: 101, y: 150)) <= 0, "its edge is")
+        check(box.handles.count == 8 && underline.handles.count == 2, "a rectangle has 8 handles, a line 2")
+        if case let .rectangle(rect) = box.movingHandle(2, to: CGPoint(x: 400, y: 250)).shape {
+            check(rect == CGRect(x: 100, y: 100, width: 300, height: 150), "dragging the top-right corner keeps the opposite corner: \(rect)")
+        }
+        if case let .rectangle(rect) = box.movingHandle(5, to: CGPoint(x: 50, y: 999)).shape {
+            check(rect == CGRect(x: 50, y: 100, width: 50, height: 100), "dragging the right edge past the left flips it, height unchanged: \(rect)")
+        }
+        if case let .line(from, to) = underline.movingHandle(1, to: CGPoint(x: 600, y: 320)).shape {
+            check(from == CGPoint(x: 100, y: 300) && to == CGPoint(x: 600, y: 320), "dragging an end moves only that end")
+        }
+        if case let .line(from, to) = underline.offsetBy(dx: 10, dy: -20).shape {
+            check(from == CGPoint(x: 110, y: 280) && to == CGPoint(x: 510, y: 280), "moving shifts both ends")
+        }
+        let start = CGPoint(x: 0, y: 0)
+        check(Annotation.constrainedEnd(CGPoint(x: 200, y: 8), from: start, fortyFive: false, snapToAxes: true) == CGPoint(x: 200, y: 0), "a nearly level line straightens")
+        check(Annotation.constrainedEnd(CGPoint(x: 200, y: 30), from: start, fortyFive: false, snapToAxes: true) == CGPoint(x: 200, y: 30), "a sloping line stays as drawn")
+        let diagonal = Annotation.constrainedEnd(CGPoint(x: 100, y: 80), from: start, fortyFive: true, snapToAxes: false)
+        check(abs(diagonal.x - diagonal.y) < 0.001, "Shift turns it in 45° steps: \(diagonal)")
+
+        print("Canvas")
+        // 400×200 pt view over an 800×400 px image, so 1 pt is 2 px.
+        let canvas = CanvasView(pixelSize: CGSize(width: 800, height: 400), pointSize: CGSize(width: 400, height: 200))
+        canvas.frame = CGRect(x: 0, y: 0, width: 400, height: 200)
+        canvas.tool = .line
+        mouse(canvas, .leftMouseDown, 50, 100)
+        mouse(canvas, .leftMouseDragged, 250, 104)
+        mouse(canvas, .leftMouseUp, 250, 104)
+        if case let .line(from, to) = canvas.annotations.first?.shape {
+            check(from == CGPoint(x: 100, y: 200) && to == CGPoint(x: 500, y: 200), "a nearly level drag draws a level line: \(from) → \(to)")
+        } else {
+            check(false, "drawing with the Line tool adds a line")
+        }
+        canvas.tool = .select
+        check(canvas.hitTest(CGPoint(x: 150, y: 102)) === canvas, "in Select text mode a drawing catches the click")
+        check(canvas.hitTest(CGPoint(x: 150, y: 150)) == nil, "elsewhere clicks go through to Live Text")
+        mouse(canvas, .leftMouseDown, 150, 101)
+        mouse(canvas, .leftMouseDragged, 160, 81)
+        mouse(canvas, .leftMouseUp, 160, 81)
+        if case let .line(from, to) = canvas.annotations.first?.shape {
+            check(canvas.hasSelection && from == CGPoint(x: 120, y: 160) && to == CGPoint(x: 520, y: 160), "grabbing a line moves it: \(from) → \(to)")
+        }
+        mouse(canvas, .leftMouseDown, 260, 80) // the right end's handle
+        mouse(canvas, .leftMouseDragged, 300, 140)
+        mouse(canvas, .leftMouseUp, 300, 140)
+        if case let .line(from, to) = canvas.annotations.first?.shape {
+            check(from == CGPoint(x: 120, y: 160) && to == CGPoint(x: 600, y: 280), "dragging its handle moves that end: \(to)")
+        }
+        canvas.color = .systemGreen
+        canvas.thickness = .heavy
+        let restyled = canvas.annotations.first!
+        check(restyled.color == .systemGreen && restyled.width == 18, "colour and thickness apply to the selected drawing: width \(restyled.width)")
+        check(canvas.deleteSelected() && canvas.annotations.isEmpty, "Delete removes the selected drawing")
+        canvas.undo()
+        check(canvas.annotations.first?.width == 18, "undo brings it back")
+        mouse(canvas, .leftMouseDown, 350, 20)
+        check(!canvas.hasSelection, "clicking away puts it down")
+
         print("Snapping")
         // 200×150 pt at 2x: white, with a 1 px grey line down column 200 and across row 100 (from the top).
         let lines = makeLines(pixelSize: CGSize(width: 400, height: 300), column: 200, row: 100)
@@ -265,6 +332,24 @@ struct SelfTest {
         // CG's origin is bottom-left, so row-from-top r sits at y = height - r - 1.
         context.fill(CGRect(x: 0, y: Int(pixelSize.height) - row - 1, width: Int(pixelSize.width), height: 1))
         return context.makeImage()!
+    }
+
+    /// Sends a mouse event at a point in the canvas, which has no window, so window and view points match.
+    static func mouse(_ view: NSView, _ type: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat) {
+        let event = NSEvent.mouseEvent(with: type, location: CGPoint(x: x, y: y), modifierFlags: [], timestamp: 0,
+                                       windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        switch type {
+        case .leftMouseDown: view.mouseDown(with: event)
+        case .leftMouseDragged: view.mouseDragged(with: event)
+        default: view.mouseUp(with: event)
+        }
+    }
+
+    /// Writes PNG data to a new file in `dir` and returns its URL.
+    static func writePNG(_ data: Data, in dir: URL) -> URL {
+        let url = dir.appendingPathComponent("\(UUID().uuidString).png")
+        try! data.write(to: url)
+        return url
     }
 
     /// Reads a pixel in image coordinates (origin bottom-left), converted to sRGB.

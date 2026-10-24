@@ -38,6 +38,7 @@ final class PreviewController: NSObject, NSWindowDelegate {
     private let overlay = ImageAnalysisOverlayView()
     private let canvas: CanvasView
     private let toolPicker = NSSegmentedControl()
+    private let thicknessPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private var swatches: [SwatchButton] = []
     private var undoButton: NSButton!
     private var clearButton: NSButton!
@@ -144,6 +145,7 @@ final class PreviewController: NSObject, NSWindowDelegate {
 
         selectTool(.select)
         selectColor(0)
+        selectThickness(.regular)
         updateButtons()
     }
 
@@ -172,10 +174,21 @@ final class PreviewController: NSObject, NSWindowDelegate {
         let swatchRow = NSStackView(views: swatches)
         swatchRow.spacing = 2
 
+        for thickness in Thickness.allCases {
+            thicknessPicker.addItem(withTitle: thickness.title)
+            thicknessPicker.lastItem?.image = Self.thicknessImage(thickness)
+            thicknessPicker.lastItem?.tag = thickness.rawValue
+        }
+        thicknessPicker.imagePosition = .imageOnly
+        thicknessPicker.toolTip = "Line thickness and text size ([ and ])"
+        thicknessPicker.setAccessibilityLabel("Thickness")
+        thicknessPicker.target = self
+        thicknessPicker.action = #selector(thicknessPicked)
+
         undoButton = iconButton("arrow.uturn.backward", fallback: "Undo", tip: "Undo (⌘Z)", action: #selector(undo))
         clearButton = iconButton("eraser", fallback: "Clear", tip: "Clear all drawings", action: #selector(clearDrawings))
 
-        let bar = NSStackView(views: [toolPicker, swatchRow, flexibleSpace(), undoButton, clearButton])
+        let bar = NSStackView(views: [toolPicker, thicknessPicker, swatchRow, flexibleSpace(), undoButton, clearButton])
         bar.spacing = 12
         bar.setCustomSpacing(4, after: undoButton)
         bar.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
@@ -211,6 +224,23 @@ final class PreviewController: NSObject, NSWindowDelegate {
         bar.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         bar.alignment = .centerY
         return bar
+    }
+
+    /// A short level line as thick as the option, for the thickness menu.
+    private static func thicknessImage(_ thickness: Thickness) -> NSImage {
+        let image = NSImage(size: NSSize(width: 24, height: 14), flipped: false) { rect in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 4, y: rect.midY))
+            path.line(to: NSPoint(x: rect.maxX - 4, y: rect.midY))
+            path.lineWidth = 1.5 * thickness.strokeScale
+            path.lineCapStyle = .round
+            NSColor.black.setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = thickness.title
+        return image
     }
 
     private func iconButton(_ symbol: String, fallback: String, tip: String, action: Selector) -> NSButton {
@@ -371,6 +401,15 @@ final class PreviewController: NSObject, NSWindowDelegate {
         for swatch in swatches { swatch.isChosen = swatch.tag == index }
     }
 
+    @objc private func thicknessPicked() {
+        selectThickness(Thickness(rawValue: thicknessPicker.selectedTag()) ?? .regular)
+    }
+
+    private func selectThickness(_ thickness: Thickness) {
+        canvas.thickness = thickness
+        thicknessPicker.selectItem(withTag: thickness.rawValue)
+    }
+
     @objc private func undo() {
         canvas.undo()
     }
@@ -476,8 +515,18 @@ final class PreviewController: NSObject, NSWindowDelegate {
         }
 
         guard modifiers.isEmpty, !typing else { return false }
-        if event.keyCode == 53 { // Esc clears a text selection
-            overlay.resetSelection()
+        switch event.keyCode {
+        case 53: // Esc puts down the selected drawing, or clears a text selection
+            if !canvas.deselect() { overlay.resetSelection() }
+            return true
+        case 51, 117: // Delete and Forward Delete remove the selected drawing
+            return canvas.deleteSelected()
+        default:
+            break
+        }
+        if key == "[" || key == "]" {
+            let step = key == "[" ? -1 : 1
+            if let thickness = Thickness(rawValue: canvas.thickness.rawValue + step) { selectThickness(thickness) }
             return true
         }
         if let tool = Tool.allCases.first(where: { $0.key == key }) {
@@ -511,7 +560,11 @@ final class PreviewController: NSObject, NSWindowDelegate {
                          color: .systemYellow, width: 36),
             .text("Snapkeep", origin: CGPoint(x: screenshot.pixelSize.width * 0.65, y: screenshot.pixelSize.height * 0.2),
                   color: .systemGreen, fontSize: 48),
+            .line(from: CGPoint(x: screenshot.pixelSize.width * 0.65, y: screenshot.pixelSize.height * 0.17),
+                  to: CGPoint(x: screenshot.pixelSize.width * 0.85, y: screenshot.pixelSize.height * 0.17),
+                  color: .systemGreen, width: 6),
         ]
         samples.forEach(canvas.add)
+        canvas.select(1) // shows the handles on the arrow
     }
 }
