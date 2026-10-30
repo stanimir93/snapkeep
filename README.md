@@ -220,6 +220,8 @@ zip, and the [Pages workflow](.github/workflows/pages.yml) redeploys the
 [download page](https://stanimir93.github.io/snapkeep/) from `site/` with the new version, size
 and link. To preview the page locally, run `scripts/build-site.sh` and open
 `build/site/index.html`.
+Its screenshot, `site/preview.png`, is the preview window drawn over a made-up app window;
+`scripts/site-screenshot/make.sh` redraws it after a `./build.sh build` (needs Google Chrome).
 
 To check the layout without screen access:
 

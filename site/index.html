@@ -8,7 +8,7 @@
 <link rel="icon" href="icon.png">
 <meta property="og:title" content="Snapkeep">
 <meta property="og:description" content="A menu bar screenshot app for macOS that keeps your screenshots on screen, on the clipboard and on disk.">
-<meta property="og:image" content="https://stanimir93.github.io/snapkeep/icon.png">
+<meta property="og:image" content="https://stanimir93.github.io/snapkeep/preview.png">
 <style>
   :root {
     --bg: #f5f6f8;
@@ -53,7 +53,7 @@
   kbd { white-space: nowrap; }
 
   .hero { text-align: center; padding: 72px 0 56px; }
-  .hero img { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(31, 111, 242, 0.3)); }
+  .hero > img { width: 128px; height: 128px; filter: drop-shadow(0 10px 24px rgba(31, 111, 242, 0.3)); }
   .hero h1 { font-size: 52px; letter-spacing: -0.02em; margin: 16px 0 8px; }
   .hero p.tagline { font-size: 21px; color: var(--muted); max-width: 600px; margin: 0 auto 32px; }
   .download {
@@ -68,6 +68,18 @@
   .meta { color: var(--muted); font-size: 15px; margin-top: 16px; }
   .meta .version { color: var(--text); font-weight: 600; }
   .links { font-size: 15px; margin-top: 6px; }
+  .shot {
+    margin: 48px auto 0; max-width: 820px; padding: 28px;
+    background: linear-gradient(135deg, #cfe0ff 0%, #e6dcff 55%, #ffe1ec 100%);
+    border-radius: 22px;
+  }
+  .shot img {
+    display: block; width: 100%; height: auto; border-radius: 12px; background: #fff;
+    box-shadow: 0 24px 60px rgba(20, 30, 60, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    .shot { background: linear-gradient(135deg, #1d3a75 0%, #35286b 55%, #5a2443 100%); }
+  }
   .links a + a::before { content: "·"; color: var(--muted); margin: 0 10px; display: inline-block; }
 
   section { padding: 36px 0; border-top: 1px solid var(--line); }
@@ -95,6 +107,7 @@
 
   @media (max-width: 600px) {
     .hero { padding-top: 48px; }
+    .shot { padding: 12px; border-radius: 16px; }
     .hero h1 { font-size: 40px; }
     .hero p.tagline { font-size: 18px; }
   }
@@ -114,6 +127,9 @@
     <div class="meta">macOS 14 Sonoma or later · Apple Silicon · Free and open source</div>
     <div class="links">
       <a href="{{NOTES_URL}}">Release notes</a><a href="https://github.com/stanimir93/snapkeep/releases">All versions</a><a href="https://github.com/stanimir93/snapkeep">Source on GitHub</a>
+    </div>
+    <div class="shot">
+      <img src="preview.png" width="900" height="656" alt="A Snapkeep preview window with a red box, a blue arrow, a highlighted line and a text label drawn over a screenshot, and Copy, Copy Text, Save, Show in Finder and Delete buttons below">
     </div>
   </header>
 

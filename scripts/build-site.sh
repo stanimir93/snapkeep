@@ -27,4 +27,5 @@ sed -e "s|{{VERSION}}|$version|g" \
     -e "s|{{NOTES_URL}}|$notes|g" \
     site/index.html >"$OUT/index.html"
 cp docs/icon.png "$OUT/icon.png"
+cp site/preview.png "$OUT/preview.png"
 echo "Built $OUT for Snapkeep $version"
