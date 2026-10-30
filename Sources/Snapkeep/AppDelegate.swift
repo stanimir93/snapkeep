@@ -372,14 +372,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Self-check
 
-    /// `Snapkeep --render-preview in.png out-dir`: opens a preview with sample drawings, waits for
-    /// Live Text, then writes the window and the exported image to out-dir and quits.
+    /// `Snapkeep --render-preview in.png out-dir [--site]`: opens a preview with sample drawings,
+    /// waits for Live Text, then writes the window and the exported image to out-dir and quits.
+    /// --site draws only the box and the highlight, for the download page's screenshot.
     private func runRenderCheck(arguments: [String]) {
         guard arguments.count >= 2, let screenshot = Screenshot.load(URL(fileURLWithPath: arguments[0])) else {
-            print("usage: Snapkeep --render-preview <image.png> <output-dir>")
+            print("usage: Snapkeep --render-preview <image.png> <output-dir> [--site]")
             exit(2)
         }
         let output = URL(fileURLWithPath: arguments[1], isDirectory: true)
+        let forSite = arguments.dropFirst(2).contains("--site")
         let preview = openPreview(screenshot, status: "Copied to clipboard")
         let started = Date()
         Task { @MainActor in
@@ -387,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             print(String(format: "live-text-seconds %.3f", Date().timeIntervalSince(started)))
             do {
                 try preview.renderWindow(to: output.appendingPathComponent("window-plain.png"))
-                preview.addSampleDrawings()
+                preview.addSampleDrawings(forSite: forSite)
                 try await Task.sleep(for: .milliseconds(100))
                 try preview.renderWindow(to: output.appendingPathComponent("window-drawn.png"))
                 try preview.currentPNG()?.write(to: output.appendingPathComponent("export.png"))

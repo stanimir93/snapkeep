@@ -545,8 +545,8 @@ final class PreviewController: NSObject, NSWindowDelegate {
         try rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
-    /// Simulates drawing for the self-check render.
-    func addSampleDrawings() {
+    /// Simulates drawing for the self-check render. forSite keeps only the box and the highlight.
+    func addSampleDrawings(forSite: Bool = false) {
         selectTool(.rectangle)
         let samples: [Annotation] = [
             .rectangle(CGRect(x: screenshot.pixelSize.width * 0.1, y: screenshot.pixelSize.height * 0.2,
@@ -564,6 +564,15 @@ final class PreviewController: NSObject, NSWindowDelegate {
                   to: CGPoint(x: screenshot.pixelSize.width * 0.85, y: screenshot.pixelSize.height * 0.17),
                   color: .systemGreen, width: 6),
         ]
+        if forSite {
+            samples.filter {
+                switch $0.shape {
+                case .rectangle, .highlighter: return true
+                default: return false
+                }
+            }.forEach(canvas.add)
+            return
+        }
         samples.forEach(canvas.add)
         canvas.select(1) // shows the handles on the arrow
     }

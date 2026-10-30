@@ -233,7 +233,8 @@ build/Snapkeep.app/Contents/MacOS/Snapkeep --render-recording out-dir/
 ```
 
 `--render-preview` writes `window-plain.png`, `window-drawn.png` (with sample drawings) and
-`export.png`, and prints how long Live Text took. `--render-overlay` draws the capture overlay over
+`export.png`, and prints how long Live Text took. With `--site` after the folder, it draws only the
+box and the highlight, as on the download page. `--render-overlay` draws the capture overlay over
 `screen.png` while hovering a window and with a snapped selection, writes the cropped capture, and
 renders Copy Text mode before and after Select Text and after a copy (`overlay-text.png`,
 `overlay-text-picking.png`, `overlay-text-copied.png`).
