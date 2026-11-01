@@ -322,6 +322,8 @@ enum T3Code {
     /// T3 Code turns down images larger than this.
     static let maxImageBytes = 10 * 1024 * 1024
     static let maxTextCharacters = 32_000
+    /// Returned when T3 hasn't picked the screenshot up yet. The files stay, so it arrives later.
+    static let waitingMessage = "Waiting for T3 Code: it appears when you switch to T3"
 
     static var userData: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".t3/userdata", isDirectory: true)
@@ -369,7 +371,7 @@ enum T3Code {
         try? await Task.sleep(for: .milliseconds(150))
         await bringForward(appURL)
         if await waitUntilPickedUp(metadata, seconds: 4) { return "Sent to T3 Code" }
-        return "Waiting for T3 Code: it appears when you switch to T3"
+        return waitingMessage
     }
 
     /// The `<id>.json` T3 Code expects, matching what its own Snap Shot writes.

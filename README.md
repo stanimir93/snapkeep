@@ -209,7 +209,8 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
 You can add your own buttons to the screenshot preview and to the bar under the selection while
 you capture, to the right of **Copy & Close**. Each one either runs a shell command with the
 screenshot or sends it to T3 Code. Pressed while capturing, it saves the screenshot to
-`~/Pictures/Screenshots` and runs straight away, without a preview or touching the clipboard.
+`~/Pictures/Screenshots` and runs straight away, without a preview or touching the clipboard. It
+shows a notice only if something goes wrong.
 Set them up in
 `~/Library/Application Support/Snapkeep/custom-buttons.json`. **Settings → Open Config File**
 creates the file if needed and opens it. Settings also lists your buttons, with a colour picker

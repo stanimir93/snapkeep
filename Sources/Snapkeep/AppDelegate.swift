@@ -228,8 +228,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             let context = ButtonContext(png: data, fileURL: url, transcript: text, source: capture.source, capturedAt: capturedAt)
             do {
+                // No notice when it worked: it would cover the app the screenshot went to, often
+                // right where you type. Only a T3 send that hasn't arrived yet, or an error, says so.
                 let message = try await ButtonRunner.run(button, context: context)
-                Toast.show(message, detail: url.lastPathComponent, symbol: "checkmark.circle.fill")
+                if message == T3Code.waitingMessage {
+                    Toast.show(message, detail: url.lastPathComponent, symbol: "clock")
+                }
             } catch {
                 Toast.show(error.localizedDescription, detail: url.lastPathComponent, symbol: "exclamationmark.triangle")
             }
