@@ -48,10 +48,13 @@ final class CaptureOverlayView: NSView {
 
     let image: CGImage
     let mode: CaptureMode
+    let customButtons: [CustomButton]
     var onBeginInteraction: (() -> Void)?
     var onConfirm: (() -> Void)?
     /// Copy & Close: copy the selection without a preview or a file. Image mode only.
     var onCopy: (() -> Void)?
+    /// A custom button from custom-buttons.json, by its index. Image mode only.
+    var onCustomButton: ((Int) -> Void)?
     var onCancel: (() -> Void)?
     var onToggleSnapping: (() -> Void)?
     /// Select Text: the text to copy. Text mode only. The overlay stays open, so several pieces
@@ -95,9 +98,10 @@ final class CaptureOverlayView: NSView {
     }
 
     /// `windows` are in this screen's coordinates.
-    init(size: CGSize, image: CGImage, windows: [WindowInfo], mode: CaptureMode) {
+    init(size: CGSize, image: CGImage, windows: [WindowInfo], mode: CaptureMode, customButtons: [CustomButton] = []) {
         self.image = image
         self.mode = mode
+        self.customButtons = customButtons
         self.windows = windows
         snapper = Snapper(size: size, scale: CGFloat(image.width) / size.width, windowFrames: windows.map(\.frame))
         super.init(frame: CGRect(origin: .zero, size: size))
@@ -186,7 +190,7 @@ final class CaptureOverlayView: NSView {
 
     private func window(at point: CGPoint) -> WindowInfo? {
         guard let match = windows.first(where: { $0.frame.contains(point) }) else { return nil }
-        return WindowInfo(frame: match.frame.intersection(bounds), owner: match.owner)
+        return WindowInfo(frame: match.frame.intersection(bounds), owner: match.owner, title: match.title, processID: match.processID)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -323,6 +327,10 @@ final class CaptureOverlayView: NSView {
             if selection != nil { onConfirm?() }
         case 123, 124, 125, 126: // arrows
             nudge(event)
+        case _ where mode == .image && event.modifierFlags.contains(.command)
+            && customButtons.contains { $0.key == event.charactersIgnoringModifiers?.lowercased() }:
+            let key = event.charactersIgnoringModifiers?.lowercased()
+            if selection != nil, let index = customButtons.firstIndex(where: { $0.key == key }) { onCustomButton?(index) }
         default:
             if event.charactersIgnoringModifiers?.lowercased() == "f" {
                 onBeginInteraction?()
@@ -554,7 +562,17 @@ final class CaptureOverlayView: NSView {
             let copy = ColorButton(title: "Copy & Close", symbol: "doc.on.doc", color: .controlAccentColor,
                                    target: self, action: #selector(copyClicked))
             copy.toolTip = "Copy to the clipboard, without a preview or a file (Return, ⌘C)"
-            setActionButtons([cancelButton(), capture, copy])
+            // Your own buttons from custom-buttons.json: capture, save and run, without a preview.
+            let custom = customButtons.enumerated().map { index, button in
+                let view = ColorButton(title: button.title, symbol: button.symbol ?? "", color: button.displayColor,
+                                       target: self, action: #selector(customClicked))
+                view.tag = index
+                let shortcut = button.key.map { " (⌘\($0.uppercased()))" } ?? ""
+                view.toolTip = (button.action == .t3code ? "Capture and add it to the open thread in T3 Code" : "Capture and run \(button.command ?? "")")
+                    + shortcut
+                return view
+            }
+            setActionButtons([cancelButton(), capture, copy] + custom)
         case .text:
             // The same layout: copy everything in blue, pick part of the text in orange.
             let copy = ColorButton(title: mode.action.title, symbol: mode.action.symbol, color: .controlAccentColor,
@@ -636,6 +654,10 @@ final class CaptureOverlayView: NSView {
 
     @objc private func copyClicked() {
         onCopy?()
+    }
+
+    @objc private func customClicked(_ sender: NSButton) {
+        onCustomButton?(sender.tag)
     }
 
     // MARK: Select Text

@@ -10,6 +10,9 @@ struct Screenshot {
     let cgImage: CGImage
     /// Size in points (pixels at 144 dpi are half as many points), used to size the preview.
     let pointSize: CGSize
+    /// Set for new captures, nil for screenshots opened from a file.
+    var source: CaptureSource?
+    var capturedAt: Date?
 
     var pixelSize: CGSize { CGSize(width: cgImage.width, height: cgImage.height) }
 

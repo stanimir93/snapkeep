@@ -33,6 +33,8 @@ it. In the preview you can select text straight from the image (Live Text) and d
   delete it. Copy and Save include the drawings at full resolution.
 - **Snapping selection.** The screen freezes while you select, and edges snap to windows and to
   the lines between panes.
+- **Your own buttons.** Add buttons to the preview that run a command with the screenshot, or
+  send it straight to T3 Code.
 - **Lightweight.** Native Swift with no dependencies and no network access. It lives in the menu
   bar, not the Dock.
 
@@ -201,6 +203,61 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
   the macOS Screenshot tool: the shutter when it takes a screenshot (not for text capture), and the
   start and stop chimes for a recording. Turn it off for silent captures.
 - **Open Snapkeep at login.** The same switch as **Open at Login** in the menu.
+
+## Custom buttons
+
+You can add your own buttons to the screenshot preview and to the bar under the selection while
+you capture, to the right of **Copy & Close**. Each one either runs a shell command with the
+screenshot or sends it to T3 Code. Pressed while capturing, it saves the screenshot to
+`~/Pictures/Screenshots` and runs straight away, without a preview or touching the clipboard.
+Set them up in
+`~/Library/Application Support/Snapkeep/custom-buttons.json`. **Settings → Open Config File**
+creates the file if needed and opens it. Settings also lists your buttons, with a colour picker
+for each. New previews pick up changes.
+
+```json
+{
+  "buttons": [
+    { "title": "Send to T3", "action": "t3code", "symbol": "paperplane", "key": "t" },
+    { "title": "Open in Preview", "command": "open -a Preview \"$SNAPKEEP_IMAGE\"", "symbol": "eye" }
+  ]
+}
+```
+
+| Key | What it does |
+| --- | --- |
+| `title` | The button's label. Required. |
+| `action` | `command` (the default) or `t3code`. |
+| `command` | For `command` buttons: what to run, in a login `zsh`, so your `PATH` works. |
+| `symbol` | An [SF Symbol](https://developer.apple.com/sf-symbols/) name for the icon. Optional. |
+| `key` | One letter that presses the button with `⌘`, in the preview and while capturing. `C`, `S`, `W` and `Z` are taken. |
+| `closePreview` | `true` closes the preview after the button succeeds. |
+| `color` | The button's colour, like `"#db2777"`. Send to T3 is T3 Code's pink by default, others grey. You can also pick it in Settings. |
+
+A command gets these environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `SNAPKEEP_IMAGE` | A PNG of the screenshot with your drawings, in a temporary folder |
+| `SNAPKEEP_FILE` | The screenshot file in `~/Pictures/Screenshots` (without unsaved drawings) |
+| `SNAPKEEP_TEXT` | The Live Text found in the image |
+| `SNAPKEEP_APP`, `SNAPKEEP_WINDOW_TITLE`, `SNAPKEEP_BUNDLE_ID` | The window under the middle of the selection, when Snapkeep knows it |
+
+The last line the command prints shows in the preview's status bar, so a script can report, say,
+the URL it uploaded to. A command that fails shows its last line as the error. Commands are
+stopped after 60 seconds.
+
+### Send to T3
+
+It's off until you tick **Settings → Send to T3 Code button**, which adds a `t3code` button. It puts the screenshot in the
+composer of the thread open in T3 Code, the same as T3's own Snap Shot,
+along with the app and window title and the Live Text. Turn on Snap Shot in T3 Code's settings
+first.
+
+It works through the folder T3's Snap Shot uses: Snapkeep writes the image and its details to
+`~/.t3/userdata/snap-shots`, then brings T3 Code to the front, which makes T3 pick them up. This
+isn't a public T3 API, so a T3 update can break it. T3 accepts images up to 10 MB, and it only
+works with T3 Code running on the same Mac.
 
 ## Development
 

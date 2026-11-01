@@ -248,8 +248,91 @@ struct SelfTest {
             check(false, "analysis threw \(error)")
         }
 
+        await checkCustomButtons(in: dir, png: shot.pngData)
+
         print(failures == 0 ? "All checks passed" : "\(failures) check(s) failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func checkCustomButtons(in dir: URL, png: Data) async {
+        print("Custom buttons")
+        let config = Data("""
+        {"buttons": [
+          {"title": "Upload", "command": "upload.sh", "key": "U", "symbol": "icloud"},
+          {"title": "Send to T3", "action": "t3code", "key": "t", "closePreview": true},
+          {"title": "", "command": "x"},
+          {"title": "Nothing to run"},
+          {"title": "Odd", "action": "fax"},
+          {"title": "Clash", "command": "y", "key": "c"},
+          {"title": "Twice", "command": "z", "key": "u"}
+        ]}
+        """.utf8)
+        let loaded = CustomButtons.parse(config)
+        check(loaded.buttons.map(\.title) == ["Upload", "Send to T3", "Clash", "Twice"], "keeps the usable buttons: \(loaded.buttons.map(\.title))")
+        check(loaded.buttons.first?.action == .command && loaded.buttons.first?.key == "u", "a command button by default, key lowercased")
+        check(loaded.buttons[1].action == .t3code && loaded.buttons[1].closePreview, "reads the T3 action and closePreview")
+        check(loaded.buttons[2].key == nil && loaded.buttons[3].key == nil, "⌘C and a key used twice are dropped")
+        check(loaded.problems.count == 5, "reports each problem: \(loaded.problems)")
+        check(!CustomButtons.parse(Data("{nope".utf8)).problems.isEmpty, "bad JSON is reported")
+
+        let file = dir.appendingPathComponent("config/custom-buttons.json")
+        check(CustomButtons.load(from: file).buttons.isEmpty, "no file means no buttons")
+        check((try? CustomButtons.addT3Code(to: file)) == true, "adds the T3 button to a new file")
+        check((try? CustomButtons.addT3Code(to: file)) == false, "doesn't add it twice")
+        try! Data(#"{"mine": 1, "buttons": [{"title": "Open", "command": "open \"$SNAPKEEP_IMAGE\""}]}"#.utf8).write(to: file)
+        _ = try? CustomButtons.addT3Code(to: file)
+        let merged = CustomButtons.load(from: file)
+        let raw = try! JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        check(merged.buttons.map(\.title) == ["Open", "Send to T3"] && raw["mine"] as? Int == 1,
+              "adding keeps your buttons and other keys")
+
+        try! CustomButtons.removeT3Code(from: file)
+        check(CustomButtons.load(from: file).buttons.map(\.title) == ["Open"], "turning T3 off removes only its button")
+        _ = try? CustomButtons.addT3Code(to: file)
+        let colored = CustomButtons.parse(Data(##"{"buttons": [{"title": "A", "command": "a", "color": "#00ff00"}, {"title": "B", "command": "b", "color": "pink"}, {"title": "T", "action": "t3code"}]}"##.utf8))
+        check(colored.buttons[0].displayColor.hexString == "#00ff00", "a button takes its colour")
+        check(colored.buttons[1].color == nil && colored.problems.count == 1, "a bad colour is reported and ignored")
+        check(colored.buttons[2].displayColor.hexString == CustomButton.t3Pink, "T3 is pink by default")
+        check(colored.buttons[1].displayColor.hexString == CustomButton.defaultGrey, "others are grey by default")
+        try! CustomButtons.setColor("#123456", forButtonAt: 1, in: file)
+        check(CustomButtons.load(from: file).buttons[1].color == "#123456", "Settings saves a colour into the file")
+        try! CustomButtons.setColor(nil, forButtonAt: 1, in: file)
+        check(CustomButtons.load(from: file).buttons[1].color == nil, "and Default removes it")
+
+        let date = ISO8601DateFormatter().date(from: "2026-11-01T22:37:05Z")!
+        let source = CaptureSource(appName: "Safari", windowTitle: "  Docs  ", bundleID: "com.apple.Safari", processID: nil)
+        let pending = T3Code.pendingSnapShot(id: "abc-123", name: "screenshot.png", sizeBytes: 42, capturedAt: date,
+                                             source: source, text: String(repeating: "a", count: 40_000))
+        let details = pending["source"] as? [String: Any] ?? [:]
+        check(pending["mimeType"] as? String == "image/png" && pending["sizeBytes"] as? Int == 42, "T3 metadata has type and size")
+        check(details["kind"] as? String == "snap-shot" && details["capturedAt"] as? String == "2026-11-01T22:37:05.000Z",
+              "marked as a Snap Shot with an ISO time: \(details["capturedAt"] ?? "none")")
+        check(details["windowTitle"] as? String == "Docs" && details["appIdentifier"] as? String == "com.apple.Safari", "app and window details")
+        check((details["accessibleText"] as? String)?.count == T3Code.maxTextCharacters, "text cut to T3's limit")
+        let bare = T3Code.pendingSnapShot(id: "abc", name: "s.png", sizeBytes: 1, capturedAt: date, source: nil, text: " ")
+        let bareDetails = bare["source"] as? [String: Any] ?? [:]
+        check(bareDetails["appName"] as? String == "Snapkeep" && bareDetails["accessibleText"] == nil,
+              "without a source it says Snapkeep and leaves the text out")
+        check(UUID().uuidString.lowercased().range(of: "^[a-f0-9-]+$", options: .regularExpression) != nil, "ids match T3's pattern")
+
+        let context = ButtonContext(png: png, fileURL: dir.appendingPathComponent("screenshot-x.png"), transcript: "hello",
+                                    source: source, capturedAt: date)
+        let echo = CustomButton(title: "Echo", symbol: nil, action: .command,
+                                command: #"test -s "$SNAPKEEP_IMAGE" && echo "$SNAPKEEP_APP $SNAPKEEP_TEXT $(basename "$SNAPKEEP_IMAGE")""#,
+                                key: nil, closePreview: false)
+        do {
+            let message = try await ButtonRunner.run(echo, context: context)
+            check(message == "Safari hello screenshot-x.png", "a command gets the image and details: \(message)")
+        } catch {
+            check(false, "the command threw \(error)")
+        }
+        let failing = CustomButton(title: "Broken", symbol: nil, action: .command, command: "echo nope >&2; exit 3", key: nil, closePreview: false)
+        do {
+            _ = try await ButtonRunner.run(failing, context: context)
+            check(false, "a failing command reports an error")
+        } catch {
+            check(error.localizedDescription == "Broken failed: nope", "a failing command reports its error: \(error.localizedDescription)")
+        }
     }
 
     /// Three frames: grey, a red square over it, then the same again with a little noise that

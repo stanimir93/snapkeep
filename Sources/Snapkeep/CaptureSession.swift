@@ -12,23 +12,31 @@ final class CaptureSession {
         let rect: CGRect
         /// Copy & Close: copy only, no preview and no file.
         var copyOnly = false
+        /// The front window under the middle of the selection.
+        var source: CaptureSource?
+        /// A custom button pressed in the capture bar, to run instead of opening a preview.
+        var button: CustomButton?
     }
 
     let mode: CaptureMode
+    private let customButtons: [CustomButton]
     private let completion: (Capture?) -> Void
     private var windows: [CaptureOverlayWindow] = []
     private var overlays: [CaptureOverlayView] = []
     private var screens: [NSScreen] = []
+    private var openWindows: [WindowInfo] = []
     private var snappingEnabled = true
     private var finished = false
 
-    init(mode: CaptureMode, completion: @escaping (Capture?) -> Void) {
+    init(mode: CaptureMode, customButtons: [CustomButton] = [], completion: @escaping (Capture?) -> Void) {
         self.mode = mode
+        self.customButtons = customButtons
         self.completion = completion
     }
 
     func start() async throws {
         let openWindows = ScreenFreezer.visibleWindows()
+        self.openWindows = openWindows
         let screens = try await ScreenFreezer.freezeAllScreens()
         guard !finished else { return }
         for frozen in screens {
@@ -48,8 +56,10 @@ final class CaptureSession {
         let frame = frozen.screen.frame
         let local = openWindows
             .filter { $0.frame.intersects(frame) }
-            .map { WindowInfo(frame: $0.frame.offsetBy(dx: -frame.minX, dy: -frame.minY), owner: $0.owner) }
-        let overlay = CaptureOverlayView(size: frame.size, image: frozen.image, windows: local, mode: mode)
+            .map { WindowInfo(frame: $0.frame.offsetBy(dx: -frame.minX, dy: -frame.minY), owner: $0.owner,
+                              title: $0.title, processID: $0.processID) }
+        let overlay = CaptureOverlayView(size: frame.size, image: frozen.image, windows: local, mode: mode,
+                                         customButtons: customButtons)
         overlay.onBeginInteraction = { [weak self, weak overlay] in
             guard let self, let overlay else { return }
             self.focus(overlay)
@@ -61,6 +71,10 @@ final class CaptureSession {
         overlay.onCopy = { [weak self, weak overlay] in
             guard let self, let overlay else { return }
             self.confirm(overlay, copyOnly: true)
+        }
+        overlay.onCustomButton = { [weak self, weak overlay] index in
+            guard let self, let overlay, self.customButtons.indices.contains(index) else { return }
+            self.confirm(overlay, button: self.customButtons[index])
         }
         overlay.onCopyText = { text in Clipboard.copyText(text) }
         overlay.onCancel = { [weak self] in self?.finish(nil) }
@@ -103,11 +117,21 @@ final class CaptureSession {
         overlays.forEach { $0.setSnappingEnabled(snappingEnabled) }
     }
 
-    private func confirm(_ overlay: CaptureOverlayView, copyOnly: Bool = false) {
+    private func confirm(_ overlay: CaptureOverlayView, copyOnly: Bool = false, button: CustomButton? = nil) {
         guard let captured = overlay.capturedImage(), let selection = overlay.selection,
               let index = overlays.firstIndex(where: { $0 === overlay }) else { return }
         finish(Capture(image: captured.image, pointSize: captured.pointSize, screen: screens[index], rect: selection,
-                       copyOnly: copyOnly))
+                       copyOnly: copyOnly, source: source(of: selection, on: screens[index]), button: button))
+    }
+
+    /// The app and window under the middle of the selection.
+    private func source(of selection: CGRect, on screen: NSScreen) -> CaptureSource? {
+        let middle = CGPoint(x: selection.midX + screen.frame.minX, y: selection.midY + screen.frame.minY)
+        guard let window = openWindows.first(where: { $0.frame.contains(middle) }), !window.owner.isEmpty else { return nil }
+        let processID = window.processID > 0 ? window.processID : nil
+        return CaptureSource(appName: window.owner, windowTitle: window.title,
+                             bundleID: processID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier },
+                             processID: processID)
     }
 
     func finish(_ capture: Capture?) {
@@ -117,6 +141,7 @@ final class CaptureSession {
         windows = []
         overlays = []
         screens = []
+        openWindows = []
         NSCursor.arrow.set()
         completion(capture)
     }

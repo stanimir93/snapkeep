@@ -143,12 +143,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func startCapture(_ mode: CaptureMode) {
         guard session == nil else { return }
-        let session = CaptureSession(mode: mode) { [weak self] capture in
+        let buttons = mode == .image ? CustomButtons.load().buttons : []
+        let session = CaptureSession(mode: mode, customButtons: buttons) { [weak self] capture in
             guard let self else { return }
             self.session = nil
             guard let capture else { return }
             switch mode {
-            case .image: capture.copyOnly ? self.copyCapture(capture) : self.keepCapture(capture)
+            case .image:
+                if let button = capture.button {
+                    self.runButton(button, on: capture)
+                } else {
+                    capture.copyOnly ? self.copyCapture(capture) : self.keepCapture(capture)
+                }
             case .text: self.copyText(from: capture)
             case .record: self.startRecording(capture)
             }
@@ -188,8 +194,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         lastScreenshot = url
-        openPreview(Screenshot(url: url, pngData: data, cgImage: capture.image, pointSize: capture.pointSize),
+        openPreview(Screenshot(url: url, pngData: data, cgImage: capture.image, pointSize: capture.pointSize,
+                               source: capture.source, capturedAt: Date()),
                     status: "Copied to clipboard")
+    }
+
+    /// A custom button in the capture bar: saves to ~/Pictures/Screenshots like Capture, then runs
+    /// the button instead of opening a preview. The clipboard is left alone.
+    private func runButton(_ button: CustomButton, on capture: CaptureSession.Capture) {
+        Sounds.screenshot()
+        guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
+            Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
+            return
+        }
+        let url: URL
+        do {
+            url = try library.newFileURL()
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Toast.show("Couldn't save the screenshot", detail: error.localizedDescription, symbol: "exclamationmark.triangle")
+            return
+        }
+        lastScreenshot = url
+        let capturedAt = Date()
+        Task { @MainActor in
+            // The Live Text goes along too (T3 Code passes it to the agent). It takes a fraction of a second.
+            let text = (try? await TextRecognizer.analyze(capture.image))?.transcript
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let context = ButtonContext(png: data, fileURL: url, transcript: text, source: capture.source, capturedAt: capturedAt)
+            do {
+                let message = try await ButtonRunner.run(button, context: context)
+                Toast.show(message, detail: url.lastPathComponent, symbol: "checkmark.circle.fill")
+            } catch {
+                Toast.show(error.localizedDescription, detail: url.lastPathComponent, symbol: "exclamationmark.triangle")
+            }
+        }
     }
 
     /// Copy & Close: the image goes to the clipboard only. Nothing is kept on disk.
@@ -471,7 +510,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let size = screen.pointSize
         let fakeWindow = WindowInfo(frame: CGRect(x: size.width * 0.05, y: size.height * 0.08,
                                                   width: size.width * 0.6, height: size.height * 0.8), owner: "Notes")
-        let overlay = CaptureOverlayView(size: size, image: screen.cgImage, windows: [fakeWindow], mode: .image)
+        let overlay = CaptureOverlayView(size: size, image: screen.cgImage, windows: [fakeWindow], mode: .image,
+                                         customButtons: [.t3Code])
         let window = CaptureOverlayWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = overlay
         overlay.setEdgeMap(EdgeMap(image: screen.cgImage))

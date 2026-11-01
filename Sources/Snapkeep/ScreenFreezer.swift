@@ -12,6 +12,9 @@ struct WindowInfo {
     /// In global Cocoa coordinates (origin at the bottom-left of the main display).
     let frame: CGRect
     let owner: String
+    /// Needs Screen Recording permission; empty without it.
+    var title = ""
+    var processID: pid_t = 0
 }
 
 enum ScreenFreezer {
@@ -53,7 +56,9 @@ enum ScreenFreezer {
             else { return nil }
             // Quartz window bounds start at the top-left of the main display, y going down.
             let frame = CGRect(x: bounds.minX, y: mainHeight - bounds.maxY, width: bounds.width, height: bounds.height)
-            return WindowInfo(frame: frame, owner: info[kCGWindowOwnerName as String] as? String ?? "")
+            return WindowInfo(frame: frame, owner: info[kCGWindowOwnerName as String] as? String ?? "",
+                              title: info[kCGWindowName as String] as? String ?? "",
+                              processID: pid_t(info[kCGWindowOwnerPID as String] as? Int ?? 0))
         }
     }
 }

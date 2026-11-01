@@ -43,6 +43,9 @@ final class PreviewController: NSObject, NSWindowDelegate {
     private var undoButton: NSButton!
     private var clearButton: NSButton!
     private var copyTextButton: NSButton!
+    /// From custom-buttons.json when the preview opened.
+    private let customButtons = CustomButtons.load().buttons
+    private var customButtonViews: [NSButton] = []
     private let statusLabel = NSTextField(labelWithString: "")
 
     private var transcript = ""
@@ -218,7 +221,17 @@ final class PreviewController: NSObject, NSWindowDelegate {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 90).isActive = true
 
-        let bar = NSStackView(views: [copyButton, copyTextButton, saveButton, finderButton, deleteButton, statusLabel])
+        customButtonViews = customButtons.enumerated().map { index, custom in
+            let shortcut = custom.key.map { " (⌘\($0.uppercased()))" } ?? ""
+            let tip = custom.action == .t3code ? "Add the screenshot to the open thread in T3 Code" : custom.command ?? ""
+            let button = ColorButton(title: custom.title, symbol: custom.symbol ?? "", color: custom.displayColor,
+                                     target: self, action: #selector(customButtonClicked))
+            button.toolTip = tip + shortcut
+            button.tag = index
+            return button
+        }
+        let bar = NSStackView(views: [copyButton] + customButtonViews
+            + [copyTextButton, saveButton, finderButton, deleteButton, statusLabel])
         bar.spacing = 8
         bar.setCustomSpacing(14, after: copyButton)
         bar.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
@@ -466,6 +479,43 @@ final class PreviewController: NSObject, NSWindowDelegate {
         }
     }
 
+    @objc private func customButtonClicked(_ sender: NSButton) {
+        runCustomButton(at: sender.tag)
+    }
+
+    private func runCustomButton(at index: Int) {
+        guard customButtons.indices.contains(index), customButtonViews[index].isEnabled else { return }
+        let custom = customButtons[index]
+        guard let png = currentPNG() else {
+            flash("Couldn't render the image")
+            return
+        }
+        let context = ButtonContext(png: png, fileURL: url, transcript: transcript, source: screenshot.source,
+                                    capturedAt: screenshot.capturedAt ?? Self.fileDate(url) ?? Date())
+        let view = customButtonViews[index]
+        view.isEnabled = false
+        statusResetWork?.cancel()
+        statusResetWork = nil
+        statusLabel.stringValue = "\(custom.title)…"
+        Task { @MainActor [weak self] in
+            do {
+                let message = try await ButtonRunner.run(custom, context: context)
+                guard let self else { return }
+                view.isEnabled = true
+                self.flash(message)
+                if custom.closePreview { self.close() }
+            } catch {
+                view.isEnabled = true
+                self?.flash(error.localizedDescription)
+                NSSound.beep()
+            }
+        }
+    }
+
+    private static func fileDate(_ url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.creationDateKey]).creationDate
+    }
+
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
@@ -504,6 +554,9 @@ final class PreviewController: NSObject, NSWindowDelegate {
                 canvas.undo()
             case "w":
                 close()
+            case _ where customButtons.contains { $0.key == key }:
+                if typing { return false }
+                runCustomButton(at: customButtons.firstIndex { $0.key == key }!)
             default:
                 if event.keyCode == 51, !typing { // ⌘⌫, as in Finder
                     deleteScreenshot()

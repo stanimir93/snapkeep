@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ServiceManagement
 
-/// The Settings window: the global shortcuts, sounds and Open at Login.
+/// The Settings window: the global shortcuts, sounds, Open at Login and the custom preview buttons.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let window: SettingsWindow
@@ -11,6 +11,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let messageLabel = NSTextField(labelWithString: "")
     private let loginCheckbox = NSButton(checkboxWithTitle: "Open Snapkeep at login", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds for screenshots and recordings", target: nil, action: nil)
+    private let buttonsLabel = NSTextField(wrappingLabelWithString: "")
+    private let t3Checkbox = NSButton(checkboxWithTitle: "Send to T3 Code button", target: nil, action: nil)
+    /// One row per custom button, with a colour well.
+    private let colorRows = NSStackView()
+    private var colorButtons: [CustomButton] = []
 
     override init() {
         window = SettingsWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -26,6 +31,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         if !window.isVisible { window.center() }
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Picks up edits made to custom-buttons.json while the window was in the background.
+    func windowDidBecomeKey(_ notification: Notification) {
+        refreshButtons()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -74,14 +84,35 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let separator = NSBox()
         separator.boxType = .separator
 
-        let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, soundsCheckbox, loginCheckbox])
+        let buttonsTitle = NSTextField(labelWithString: "Custom buttons")
+        buttonsTitle.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        buttonsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        buttonsLabel.preferredMaxLayoutWidth = 320
+        t3Checkbox.target = self
+        t3Checkbox.action = #selector(toggleSendToT3)
+        t3Checkbox.toolTip = "A button that puts the screenshot in the open thread in T3 Code, like T3's own Snap Shot. "
+            + "Needs Snap Shot turned on in T3 Code's settings."
+        let openConfig = NSButton(title: "Open Config File", target: self, action: #selector(openButtonsConfig))
+        openConfig.toolTip = CustomButtons.defaultURL.path
+        let buttonsSeparator = NSBox()
+        buttonsSeparator.boxType = .separator
+
+        colorRows.orientation = .vertical
+        colorRows.alignment = .leading
+        colorRows.spacing = 6
+
+        let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, soundsCheckbox, loginCheckbox,
+                                        buttonsSeparator, buttonsTitle, t3Checkbox, buttonsLabel, colorRows, openConfig])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.setCustomSpacing(16, after: grid)
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
         separator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48).isActive = true
+        buttonsSeparator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48).isActive = true
+        stack.setCustomSpacing(6, after: buttonsTitle)
         messageLabel.widthAnchor.constraint(equalTo: hint.widthAnchor).isActive = true
+        buttonsLabel.widthAnchor.constraint(equalTo: hint.widthAnchor).isActive = true
         window.contentView = stack
         window.setContentSize(stack.fittingSize)
     }
@@ -89,7 +120,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func showMessage(_ text: String) {
         messageLabel.stringValue = text
         messageLabel.isHidden = text.isEmpty
-        // Grow or shrink downwards, keeping the title bar in place.
+        fitHeight()
+    }
+
+    /// Grows or shrinks downwards, keeping the title bar in place.
+    private func fitHeight() {
         guard let content = window.contentView else { return }
         var frame = window.frame
         let height = window.frameRect(forContentRect: NSRect(origin: .zero, size: content.fittingSize)).height
@@ -104,6 +139,116 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
         loginCheckbox.state = LoginItem.isEnabled ? .on : .off
         soundsCheckbox.state = Sounds.isEnabled ? .on : .off
+        refreshButtons()
+    }
+
+    private func refreshButtons() {
+        let loaded = CustomButtons.load()
+        var lines: [String] = []
+        if loaded.buttons.isEmpty {
+            lines.append("Add your own buttons to the screenshot preview. Each one runs a shell command with the image, "
+                + "or sends it to T3 Code.")
+        } else {
+            let names = loaded.buttons.map { button in button.key.map { "\(button.title) (⌘\($0.uppercased()))" } ?? button.title }
+            lines.append("In the capture bar and new previews: \(names.joined(separator: ", ")).")
+        }
+        lines += loaded.problems
+        buttonsLabel.stringValue = lines.joined(separator: "\n")
+        buttonsLabel.textColor = loaded.problems.isEmpty ? .secondaryLabelColor : .systemRed
+        rebuildColorRows(loaded.buttons)
+        let hasT3 = loaded.buttons.contains { $0.action == .t3code }
+        t3Checkbox.state = hasT3 ? .on : .off
+        if window.isVisible { fitHeight() }
+    }
+
+    /// "Send to T3  [colour]  Default" for each button.
+    private func rebuildColorRows(_ buttons: [CustomButton]) {
+        // Leave the rows alone while the colour panel is editing one of them.
+        if buttons == colorButtons, !colorRows.arrangedSubviews.isEmpty { return }
+        colorButtons = buttons
+        colorRows.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        colorRows.isHidden = buttons.isEmpty
+        for (index, button) in buttons.enumerated() {
+            let name = NSTextField(labelWithString: button.title)
+            name.widthAnchor.constraint(equalToConstant: 130).isActive = true
+            name.lineBreakMode = .byTruncatingTail
+            let well = NSColorWell(style: .minimal)
+            well.color = button.displayColor
+            well.tag = index
+            well.target = self
+            well.action = #selector(colorPicked)
+            well.toolTip = "The button's colour"
+            well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            let reset = NSButton(title: "Default", target: self, action: #selector(resetColor))
+            reset.tag = index
+            reset.controlSize = .small
+            reset.isEnabled = button.color != nil
+            reset.toolTip = button.action == .t3code ? "T3 Code pink" : "Grey"
+            let row = NSStackView(views: [name, well, reset])
+            row.spacing = 8
+            colorRows.addArrangedSubview(row)
+        }
+    }
+
+    @objc private func colorPicked(_ sender: NSColorWell) {
+        setColor(sender.color.hexString, at: sender.tag)
+    }
+
+    @objc private func resetColor(_ sender: NSButton) {
+        NSColorPanel.shared.close()
+        setColor(nil, at: sender.tag)
+    }
+
+    private func setColor(_ hex: String?, at index: Int) {
+        guard colorButtons.indices.contains(index) else { return }
+        do {
+            try CustomButtons.setColor(hex, forButtonAt: colorButtons[index].fileIndex)
+            showMessage("")
+        } catch {
+            showMessage(error.localizedDescription)
+        }
+        let loaded = CustomButtons.load()
+        // Update in place, so the colour well being edited stays connected to the panel.
+        colorButtons = loaded.buttons
+        for case let row as NSStackView in colorRows.arrangedSubviews {
+            for case let reset as NSButton in row.arrangedSubviews where reset.action == #selector(resetColor) {
+                reset.isEnabled = colorButtons.indices.contains(reset.tag) && colorButtons[reset.tag].color != nil
+            }
+            for case let well as NSColorWell in row.arrangedSubviews where hex == nil && colorButtons.indices.contains(well.tag) {
+                well.color = colorButtons[well.tag].displayColor
+            }
+        }
+    }
+
+    @objc private func toggleSendToT3() {
+        do {
+            if t3Checkbox.state == .on {
+                try CustomButtons.addT3Code()
+            } else {
+                NSColorPanel.shared.close()
+                try CustomButtons.removeT3Code()
+            }
+        } catch {
+            showMessage(error.localizedDescription)
+            NSSound.beep()
+        }
+        refreshButtons()
+    }
+
+    @objc private func openButtonsConfig() {
+        let url = CustomButtons.defaultURL
+        do {
+            try CustomButtons.createIfMissing(at: url)
+        } catch {
+            showMessage(error.localizedDescription)
+            return
+        }
+        // A .json file may have no app set to open it, so fall back to TextEdit.
+        if NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
+            NSWorkspace.shared.open(url)
+        } else if let textEdit = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.TextEdit") {
+            NSWorkspace.shared.open([url], withApplicationAt: textEdit, configuration: NSWorkspace.OpenConfiguration())
+        }
     }
 
     private func apply(_ shortcut: Shortcut?, to action: ShortcutAction) {
