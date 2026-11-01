@@ -218,9 +218,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastScreenshot = url
         let capturedAt = Date()
         Task { @MainActor in
-            // The Live Text goes along too (T3 Code passes it to the agent). It takes a fraction of a second.
-            let text = (try? await TextRecognizer.analyze(capture.image))?.transcript
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // Commands get the Live Text in SNAPKEEP_TEXT, which takes 0.2–0.6 s to read. T3 goes
+            // without it: the agent reads the image itself, and waiting for the text was most of
+            // the delay before the screenshot appeared in T3.
+            var text = ""
+            if button.action == .command {
+                text = (try? await TextRecognizer.analyze(capture.image))?.transcript
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
             let context = ButtonContext(png: data, fileURL: url, transcript: text, source: capture.source, capturedAt: capturedAt)
             do {
                 let message = try await ButtonRunner.run(button, context: context)

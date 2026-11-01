@@ -251,7 +251,8 @@ stopped after 60 seconds.
 
 It's off until you tick **Settings → Send to T3 Code button**, which adds a `t3code` button. It puts the screenshot in the
 composer of the thread open in T3 Code, the same as T3's own Snap Shot,
-along with the app and window title and the Live Text. Turn on Snap Shot in T3 Code's settings
+along with the app and window title. From the preview it also sends the Live Text, which the
+preview has already read; from the capture bar it skips it, so the screenshot gets there sooner. Turn on Snap Shot in T3 Code's settings
 first.
 
 It works through the folder T3's Snap Shot uses: Snapkeep writes the image and its details to
