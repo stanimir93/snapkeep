@@ -15,6 +15,14 @@ struct WindowInfo {
     /// Needs Screen Recording permission; empty without it.
     var title = ""
     var processID: pid_t = 0
+    /// The pages in a browser window, without its tabs, toolbar or sidebar. Same coordinates as
+    /// `frame`. Empty for other windows, or without Accessibility permission. See BrowserPages.
+    var pages: [CGRect] = []
+
+    func offsetBy(dx: CGFloat, dy: CGFloat) -> WindowInfo {
+        WindowInfo(frame: frame.offsetBy(dx: dx, dy: dy), owner: owner, title: title, processID: processID,
+                   pages: pages.map { $0.offsetBy(dx: dx, dy: dy) })
+    }
 }
 
 enum ScreenFreezer {

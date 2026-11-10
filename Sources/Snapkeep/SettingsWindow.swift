@@ -11,6 +11,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let messageLabel = NSTextField(labelWithString: "")
     private let loginCheckbox = NSButton(checkboxWithTitle: "Open Snapkeep at login", target: nil, action: nil)
     private let soundsCheckbox = NSButton(checkboxWithTitle: "Play sounds for screenshots and recordings", target: nil, action: nil)
+    private let pagesCheckbox = NSButton(checkboxWithTitle: "Pick just the page in browser windows", target: nil, action: nil)
+    private let pagesHint = NSTextField(wrappingLabelWithString: "")
+    private let pagesAccessButton = NSButton(title: "Open Accessibility Settings", target: nil, action: nil)
     private let buttonsLabel = NSTextField(wrappingLabelWithString: "")
     private let t3Checkbox = NSButton(checkboxWithTitle: "Send to T3 Code button", target: nil, action: nil)
     /// One row per custom button, with a colour well.
@@ -36,6 +39,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Picks up edits made to custom-buttons.json while the window was in the background.
     func windowDidBecomeKey(_ notification: Notification) {
         refreshButtons()
+        refreshPages()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -83,6 +87,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         soundsCheckbox.action = #selector(toggleSounds)
         let separator = NSBox()
         separator.boxType = .separator
+        pagesCheckbox.target = self
+        pagesCheckbox.action = #selector(togglePages)
+        pagesCheckbox.toolTip = "Hovering a page in Zen, Chrome, Safari, Arc or another browser picks the page without "
+            + "the tabs, toolbar or sidebar. Hover the browser's own bar to pick the whole window."
+        pagesHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        pagesHint.preferredMaxLayoutWidth = 300
+        pagesAccessButton.target = self
+        pagesAccessButton.action = #selector(openAccessibilitySettings)
+        pagesAccessButton.controlSize = .small
 
         let buttonsTitle = NSTextField(labelWithString: "Custom buttons")
         buttonsTitle.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -102,6 +115,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         colorRows.spacing = 6
 
         let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, soundsCheckbox, loginCheckbox,
+                                        pagesCheckbox, pagesHint, pagesAccessButton,
                                         buttonsSeparator, buttonsTitle, t3Checkbox, buttonsLabel, colorRows, openConfig])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -111,6 +125,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         separator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48).isActive = true
         buttonsSeparator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48).isActive = true
         stack.setCustomSpacing(6, after: buttonsTitle)
+        stack.setCustomSpacing(4, after: pagesCheckbox)
+        stack.setCustomSpacing(6, after: pagesHint)
+        pagesHint.widthAnchor.constraint(equalTo: hint.widthAnchor, constant: -20).isActive = true
         messageLabel.widthAnchor.constraint(equalTo: hint.widthAnchor).isActive = true
         buttonsLabel.widthAnchor.constraint(equalTo: hint.widthAnchor).isActive = true
         window.contentView = stack
@@ -140,6 +157,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         loginCheckbox.state = LoginItem.isEnabled ? .on : .off
         soundsCheckbox.state = Sounds.isEnabled ? .on : .off
         refreshButtons()
+        refreshPages()
+    }
+
+    private func refreshPages() {
+        pagesCheckbox.state = BrowserPages.isEnabled ? .on : .off
+        let missingAccess = BrowserPages.isEnabled && !BrowserPages.isTrusted
+        pagesHint.stringValue = missingAccess
+            ? "Needs Accessibility permission. Turn on Snapkeep in Privacy & Security › Accessibility."
+            : "Hover the tabs or toolbar to pick the whole window. Needs Accessibility permission."
+        pagesHint.textColor = missingAccess ? .systemRed : .secondaryLabelColor
+        let wasHidden = pagesAccessButton.isHidden
+        pagesAccessButton.isHidden = !missingAccess
+        if wasHidden != pagesAccessButton.isHidden, window.isVisible { fitHeight() }
     }
 
     private func refreshButtons() {
@@ -272,6 +302,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Sounds.isEnabled = soundsCheckbox.state == .on
         // Let the user hear what they turned on.
         Sounds.screenshot()
+    }
+
+    @objc private func togglePages() {
+        BrowserPages.isEnabled = pagesCheckbox.state == .on
+        if BrowserPages.isEnabled, !BrowserPages.isTrusted { BrowserPages.requestAccess() }
+        refreshPages()
+    }
+
+    @objc private func openAccessibilitySettings() {
+        BrowserPages.openAccessibilitySettings()
     }
 
     @objc private func toggleOpenAtLogin() {

@@ -62,7 +62,7 @@ final class CaptureOverlayView: NSView {
     var onCopyText: ((String) -> Void)?
 
     private var snapper: Snapper
-    private let windows: [WindowInfo]
+    private var windows: [WindowInfo]
     private(set) var selection: CGRect? {
         didSet {
             if selection != oldValue { copiedNotice = nil }
@@ -70,7 +70,12 @@ final class CaptureOverlayView: NSView {
             redraw()
         }
     }
-    private var hovered: WindowInfo?
+    private var hovered: Hovered?
+    /// A window, or the page in a browser window, under the pointer.
+    private struct Hovered {
+        let frame: CGRect
+        let label: String
+    }
     private var mouse: CGPoint?
     private var drag: Drag?
     private var downPoint = CGPoint.zero
@@ -103,7 +108,7 @@ final class CaptureOverlayView: NSView {
         self.mode = mode
         self.customButtons = customButtons
         self.windows = windows
-        snapper = Snapper(size: size, scale: CGFloat(image.width) / size.width, windowFrames: windows.map(\.frame))
+        snapper = Snapper(size: size, scale: CGFloat(image.width) / size.width, windowFrames: Self.snapFrames(windows))
         super.init(frame: CGRect(origin: .zero, size: size))
 
         backdrop.image = NSImage(cgImage: image, size: size)
@@ -147,6 +152,21 @@ final class CaptureOverlayView: NSView {
         snapper.edges = map
     }
 
+    /// Windows with the browser pages found after the overlay opened.
+    func setWindows(_ windows: [WindowInfo]) {
+        self.windows = windows
+        snapper.windowFrames = Self.snapFrames(windows)
+        if selection == nil, drag == nil, snapper.isEnabled {
+            hovered = mouse.flatMap(window(at:))
+            redraw()
+        }
+    }
+
+    /// Window edges and page edges both pull a dragged selection.
+    private static func snapFrames(_ windows: [WindowInfo]) -> [CGRect] {
+        windows.flatMap { [$0.frame] + $0.pages }
+    }
+
     func setSnappingEnabled(_ enabled: Bool) {
         snapper.isEnabled = enabled
         hovered = enabled && selection == nil ? mouse.flatMap(window(at:)) : nil
@@ -188,9 +208,13 @@ final class CaptureOverlayView: NSView {
         return active
     }
 
-    private func window(at point: CGPoint) -> WindowInfo? {
+    /// Over a browser's page, just the page; over its tabs, toolbar or sidebar, the whole window.
+    private func window(at point: CGPoint) -> Hovered? {
         guard let match = windows.first(where: { $0.frame.contains(point) }) else { return nil }
-        return WindowInfo(frame: match.frame.intersection(bounds), owner: match.owner, title: match.title, processID: match.processID)
+        if let page = match.pages.first(where: { $0.contains(point) }) {
+            return Hovered(frame: page.intersection(bounds), label: match.owner.isEmpty ? "Page" : "\(match.owner) page")
+        }
+        return Hovered(frame: match.frame.intersection(bounds), label: match.owner)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -437,7 +461,7 @@ final class CaptureOverlayView: NSView {
             drawLabel(copiedNotice ?? sizeText(selection), above: selection)
         } else if let hovered {
             drawBorder(hovered.frame, color: .controlAccentColor, width: 3)
-            let title = hovered.owner.isEmpty ? sizeText(hovered.frame) : "\(hovered.owner)   \(sizeText(hovered.frame))"
+            let title = hovered.label.isEmpty ? sizeText(hovered.frame) : "\(hovered.label)   \(sizeText(hovered.frame))"
             drawLabel(title, above: hovered.frame)
         }
         if let mouse, selection == nil || isCreating {

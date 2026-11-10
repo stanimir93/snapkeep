@@ -33,6 +33,9 @@ it. In the preview you can select text straight from the image (Live Text) and d
   delete it. Copy and Save include the drawings at full resolution.
 - **Snapping selection.** The screen freezes while you select, and edges snap to windows and to
   the lines between panes.
+- **Just the page in browsers.** Optional. Hover a page in Zen, Chrome, Safari, Arc or another
+  browser to pick the page without the tabs, toolbar or sidebar. Hover the browser's own bars to
+  pick the whole window.
 - **Your own buttons.** Add buttons to the preview that run a command with the screenshot, or
   send it straight to T3 Code.
 - **Lightweight.** Native Swift with no dependencies and no network access. It lives in the menu
@@ -203,6 +206,13 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
   the macOS Screenshot tool: the shutter when it takes a screenshot (not for text capture), and the
   start and stop chimes for a recording. Turn it off for silent captures.
 - **Open Snapkeep at login.** The same switch as **Open at Login** in the menu.
+- **Pick just the page in browser windows.** Off by default. While you capture, hovering the page
+  in a browser window highlights only the page, and a click picks it. Hover the tabs, toolbar or
+  sidebar to pick the whole window as before. Page edges also pull a dragged selection. It needs
+  **Accessibility** permission: turning it on asks for it, and Snapkeep asks again at launch while
+  it's on and the permission is missing. Works with Zen, Firefox, Chrome, Edge, Brave, Arc, Dia,
+  Vivaldi, Opera, Safari and DuckDuckGo. After a browser starts, its first capture can miss the page
+  while the browser builds its accessibility tree.
 
 ## Custom buttons
 
@@ -289,7 +299,11 @@ build/Snapkeep.app/Contents/MacOS/Snapkeep --render-preview some.png out-dir/
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-overlay screen.png out-dir/
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-settings out-dir/
 build/Snapkeep.app/Contents/MacOS/Snapkeep --render-recording out-dir/
+build/Snapkeep.app/Contents/MacOS/Snapkeep --list-pages
 ```
+
+`--list-pages` prints the browser windows on screen and the pages found in them. Run from a
+terminal, it uses the terminal's Accessibility permission.
 
 `--render-preview` writes `window-plain.png`, `window-drawn.png` (with sample drawings) and
 `export.png`, and prints how long Live Text took. With `--site` after the folder, it draws only the
@@ -318,6 +332,11 @@ seconds. It prints their window numbers so you can grab them with `screencapture
   crops the selection from that frozen image, so what you see is exactly what you get.
 - Window highlighting uses `CGWindowListCopyWindowInfo`. Line snapping looks for columns or rows of
   pixels that differ from their neighbours along most of the edge being dragged.
+- Browser pages come from the Accessibility tree, where browsers show each page as an
+  `AXWebArea`. When a capture starts, Snapkeep walks each browser window's tree down to its pages
+  (without reading the pages themselves) while the screens freeze, and the overlay picks them up
+  when they arrive. Chromium browsers build the tree once `AXManualAccessibility` is set on them;
+  Firefox and Zen build it on the first request, so a window with no page gets a second look.
 - Global shortcuts use Carbon `RegisterEventHotKey`, which needs no Accessibility permission. They're
   saved in `UserDefaults` and paused while you record a new one in Settings.
 - Live Text uses VisionKit's `ImageAnalyzer` and `ImageAnalysisOverlayView`. Analysis starts as

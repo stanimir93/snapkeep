@@ -37,10 +37,24 @@ final class CaptureSession {
     func start() async throws {
         let openWindows = ScreenFreezer.visibleWindows()
         self.openWindows = openWindows
+        // Look for browser pages while the screens freeze. The overlays show without waiting and
+        // pick the pages up when they arrive.
+        let pageLookup = BrowserPages.isActive
+            ? Task.detached(priority: .userInitiated) { BrowserPages.find(in: openWindows, retries: 0) } : nil
         let screens = try await ScreenFreezer.freezeAllScreens()
         guard !finished else { return }
         for frozen in screens {
             showOverlay(for: frozen, windows: openWindows)
+        }
+        if let pageLookup {
+            Task { [weak self] in
+                let pages = await pageLookup.value
+                self?.applyPages(pages)
+                // A browser that was just started, or hasn't built its tree yet, gets a second look.
+                guard BrowserPages.browserWindows(in: openWindows).contains(where: { pages[$0] == nil }) else { return }
+                let later = await Task.detached(priority: .userInitiated) { BrowserPages.find(in: openWindows, retries: 2) }.value
+                self?.applyPages(later)
+            }
         }
         let mouse = NSEvent.mouseLocation
         let pairs = Array(zip(windows, overlays))
@@ -52,12 +66,27 @@ final class CaptureSession {
         NSCursor.crosshair.set()
     }
 
+    /// Windows in a screen's coordinates.
+    private func localWindows(_ openWindows: [WindowInfo], on screen: NSScreen) -> [WindowInfo] {
+        let frame = screen.frame
+        return openWindows
+            .filter { $0.frame.intersects(frame) }
+            .map { $0.offsetBy(dx: -frame.minX, dy: -frame.minY) }
+    }
+
+    private func applyPages(_ pages: [Int: [CGRect]]) {
+        guard !finished, !pages.isEmpty else { return }
+        for (index, found) in pages where openWindows.indices.contains(index) {
+            openWindows[index].pages = found
+        }
+        for (overlay, screen) in zip(overlays, screens) {
+            overlay.setWindows(localWindows(openWindows, on: screen))
+        }
+    }
+
     private func showOverlay(for frozen: FrozenScreen, windows openWindows: [WindowInfo]) {
         let frame = frozen.screen.frame
-        let local = openWindows
-            .filter { $0.frame.intersects(frame) }
-            .map { WindowInfo(frame: $0.frame.offsetBy(dx: -frame.minX, dy: -frame.minY), owner: $0.owner,
-                              title: $0.title, processID: $0.processID) }
+        let local = localWindows(openWindows, on: frozen.screen)
         let overlay = CaptureOverlayView(size: frame.size, image: frozen.image, windows: local, mode: mode,
                                          customButtons: customButtons)
         overlay.onBeginInteraction = { [weak self, weak overlay] in

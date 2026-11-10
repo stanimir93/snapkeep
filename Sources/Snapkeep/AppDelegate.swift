@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             runRecordingCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
             return
         }
+        if CommandLine.arguments.contains("--list-pages") {
+            BrowserPages.printPages()
+            exit(0)
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--render-settings") {
             runSettingsCheck(arguments: Array(CommandLine.arguments.dropFirst(index + 1)))
             return
@@ -40,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !CGPreflightScreenCaptureAccess() {
             // Adds Snapkeep to System Settings › Privacy & Security › Screen Recording and asks once.
             CGRequestScreenCaptureAccess()
+        }
+        if BrowserPages.isEnabled, !BrowserPages.isTrusted {
+            // Every build forgets the grant (see build.sh), so ask again for a feature that was turned on.
+            BrowserPages.requestAccess()
         }
     }
 

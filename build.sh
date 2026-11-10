@@ -62,8 +62,9 @@ install_app() {
     # Every ad-hoc build has a new signature, so the old Screen Recording grant no longer
     # matches. Drop it so macOS asks again cleanly instead of showing a stale switch.
     tccutil reset ScreenCapture "$BUNDLE_ID" >/dev/null 2>&1 || true
+    tccutil reset Accessibility "$BUNDLE_ID" >/dev/null 2>&1 || true
     open "/Applications/$APP_NAME.app"
-    echo "Installed and launched. Grant Screen Recording again when macOS asks."
+    echo "Installed and launched. Grant Screen Recording again when macOS asks (and Accessibility, if browser pages are on)."
 }
 
 zip_app() {
