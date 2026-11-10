@@ -16,6 +16,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let pagesAccessButton = NSButton(title: "Open Accessibility Settings", target: nil, action: nil)
     private let buttonsLabel = NSTextField(wrappingLabelWithString: "")
     private let t3Checkbox = NSButton(checkboxWithTitle: "Send to T3 Code button", target: nil, action: nil)
+    private let buttonSoundCheckbox = NSButton(checkboxWithTitle: "Play the shutter sound for custom buttons", target: nil, action: nil)
     /// One row per custom button, with a colour well.
     private let colorRows = NSStackView()
     private var colorButtons: [CustomButton] = []
@@ -105,6 +106,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         t3Checkbox.action = #selector(toggleSendToT3)
         t3Checkbox.toolTip = "A button that puts the screenshot in the open thread in T3 Code, like T3's own Snap Shot. "
             + "Needs Snap Shot turned on in T3 Code's settings."
+        buttonSoundCheckbox.target = self
+        buttonSoundCheckbox.action = #selector(toggleButtonSound)
+        buttonSoundCheckbox.toolTip = "Turn it off when the app a button sends to makes its own sound, as T3 Code does."
         let openConfig = NSButton(title: "Open Config File", target: self, action: #selector(openButtonsConfig))
         openConfig.toolTip = CustomButtons.defaultURL.path
         let buttonsSeparator = NSBox()
@@ -116,7 +120,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let stack = NSStackView(views: [grid, hint, messageLabel, restore, separator, soundsCheckbox, loginCheckbox,
                                         pagesCheckbox, pagesHint, pagesAccessButton,
-                                        buttonsSeparator, buttonsTitle, t3Checkbox, buttonsLabel, colorRows, openConfig])
+                                        buttonsSeparator, buttonsTitle, t3Checkbox, buttonsLabel, colorRows, buttonSoundCheckbox, openConfig])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -156,6 +160,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
         loginCheckbox.state = LoginItem.isEnabled ? .on : .off
         soundsCheckbox.state = Sounds.isEnabled ? .on : .off
+        buttonSoundCheckbox.state = Sounds.isEnabled && Sounds.isEnabledForButtons ? .on : .off
+        buttonSoundCheckbox.isEnabled = Sounds.isEnabled
         refreshButtons()
         refreshPages()
     }
@@ -188,6 +194,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         rebuildColorRows(loaded.buttons)
         let hasT3 = loaded.buttons.contains { $0.action == .t3code }
         t3Checkbox.state = hasT3 ? .on : .off
+        buttonSoundCheckbox.isHidden = loaded.buttons.isEmpty
         if window.isVisible { fitHeight() }
     }
 
@@ -302,6 +309,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Sounds.isEnabled = soundsCheckbox.state == .on
         // Let the user hear what they turned on.
         Sounds.screenshot()
+        refresh()
+    }
+
+    @objc private func toggleButtonSound() {
+        Sounds.isEnabledForButtons = buttonSoundCheckbox.state == .on
+        if Sounds.isEnabledForButtons { Sounds.screenshot() }
     }
 
     @objc private func togglePages() {

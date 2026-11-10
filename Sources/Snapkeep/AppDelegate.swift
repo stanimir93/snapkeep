@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A custom button in the capture bar: saves to ~/Pictures/Screenshots like Capture, then runs
     /// the button instead of opening a preview. The clipboard is left alone.
     private func runButton(_ button: CustomButton, on capture: CaptureSession.Capture) {
-        Sounds.screenshot()
+        if Sounds.isEnabledForButtons { Sounds.screenshot() }
         guard let data = Renderer.encodePNG(capture.image, pointSize: capture.pointSize) else {
             Toast.show("Couldn't encode the screenshot", symbol: "exclamationmark.triangle")
             return

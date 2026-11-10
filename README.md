@@ -205,6 +205,8 @@ Choose **Settings…** from the menu bar icon (`⌘,` while the menu is open).
 - **Play sounds for screenshots and recordings.** On by default. Snapkeep makes the same sounds as
   the macOS Screenshot tool: the shutter when it takes a screenshot (not for text capture), and the
   start and stop chimes for a recording. Turn it off for silent captures.
+- **Play the shutter sound for custom buttons.** Under **Custom buttons**, on by default. Turn it off
+  when the app a button sends to makes its own sound, as T3 Code does.
 - **Open Snapkeep at login.** The same switch as **Open at Login** in the menu.
 - **Pick just the page in browser windows.** Off by default. While you capture, hovering the page
   in a browser window highlights only the page, and a click picks it. Hover the tabs, toolbar or

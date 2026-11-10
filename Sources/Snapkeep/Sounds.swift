@@ -12,6 +12,15 @@ enum Sounds {
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
+    static let buttonsDefaultsKey = "playSoundForButtons"
+
+    /// The shutter for a custom button in the capture bar. Some turn it off because the app the
+    /// button sends to makes its own sound, as T3 Code does.
+    static var isEnabledForButtons: Bool {
+        get { UserDefaults.standard.object(forKey: buttonsDefaultsKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: buttonsDefaultsKey) }
+    }
+
     static func screenshot() { play("Screen Capture.aif") }
     static func recordingStarted() { play("begin_record.caf") }
     static func recordingStopped() { play("end_record.caf") }
