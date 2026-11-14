@@ -463,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// from rendering offscreen.
     private func runRecordingCheck(arguments: [String]) {
         guard let path = arguments.first else {
-            print("usage: Snapkeep --render-recording <output-dir>")
+            print("usage: Snapkeep --render-recording <output-dir> [--trim]")
             exit(2)
         }
         let output = URL(fileURLWithPath: path, isDirectory: true)
@@ -484,6 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let preview = openRecordingPreview(Recording(url: copy, pointSize: pointSize, pixelSize: pixelSize, duration: duration))
                 let controls = RecordingControls(screen: NSScreen.main!, rect: CGRect(x: 100, y: 100, width: 600, height: 400))
                 controls.show()
+                if arguments.contains("--trim") { preview.trim() }
                 try await Task.sleep(for: .milliseconds(300))
                 let others = NSApp.windows.filter { $0.isVisible && $0 !== preview.panel }.map { String($0.windowNumber) }
                 print("preview window \(preview.panel.windowNumber), controls windows \(others.joined(separator: " "))")

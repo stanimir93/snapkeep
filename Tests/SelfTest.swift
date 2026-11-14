@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Carbon.HIToolbox
 import ImageIO
 
@@ -213,6 +214,25 @@ struct SelfTest {
             check(bytes < 200_000, "GIF is small: \(bytes / 1000) KB in \(String(format: "%.2f", seconds)) s")
             let estimate = try await GIFExporter.estimate(video: video, pointSize: CGSize(width: 640, height: 400), preset: .full)
             check(estimate == bytes, "a short recording's estimate is exact: \(estimate) bytes")
+
+            print("Trim")
+            let middle = dir.appendingPathComponent("trim-middle.mp4")
+            let middleDuration = try await VideoTrimmer.trim(
+                video: video, range: CMTimeRange(start: CMTime(seconds: 0.5, preferredTimescale: 600),
+                                                 end: CMTime(seconds: 1.5, preferredTimescale: 600)), to: middle)
+            check(abs(middleDuration - 1) < 0.05, "cutting 0.5 s off each end leaves 1 s: \(middleDuration) s")
+            // The second half has no frames at all, as when nothing on screen changes.
+            let tail = dir.appendingPathComponent("trim-tail.mp4")
+            let tailDuration = try await VideoTrimmer.trim(
+                video: video, range: CMTimeRange(start: CMTime(seconds: 1.2, preferredTimescale: 600),
+                                                 end: CMTime(seconds: 2, preferredTimescale: 600)), to: tail)
+            check(abs(tailDuration - 0.8) < 0.05, "a cut inside the still end keeps its length: \(tailDuration) s")
+            let tailGIF = dir.appendingPathComponent("trim-tail.gif")
+            _ = try await GIFExporter.export(video: tail, pointSize: CGSize(width: 640, height: 400), preset: .full, to: tailGIF) { _ in }
+            let tailSource = CGImageSourceCreateWithURL(tailGIF as CFURL, nil)!
+            let tailSquare = pixel(CGImageSourceCreateImageAtIndex(tailSource, 0, nil)!, x: 600, y: 60)
+            check(tailSquare.b > 200 && tailSquare.r < 80, "the trimmed GIF opens on the still frame: \(tailSquare)")
+            check(abs(gifDuration(tailSource) - tailDuration) < 0.1, "and lasts as long as the trimmed video: \(gifDuration(tailSource)) s")
 
             let smallURL = dir.appendingPathComponent("test-small.gif")
             _ = try await GIFExporter.export(video: video, pointSize: CGSize(width: 640, height: 400), preset: .small, to: smallURL) { _ in }

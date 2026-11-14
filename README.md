@@ -25,8 +25,8 @@ it. In the preview you can select text straight from the image (Live Text) and d
 - **Text-only capture.** One shortcut copies the text in an area and skips the preview. Select
   Text lets you pick parts of it on the spot, one after another, without closing.
 - **Copy & Close.** Return copies an area straight to the clipboard, with no preview and no file.
-- **Screen recording.** Record an area or a window, then save it as an MP4 video, a small GIF,
-  or both.
+- **Screen recording.** Record an area or a window, trim the start or the end, then save it as an
+  MP4 video, a small GIF, or both.
 - **Your own shortcuts.** Change any of the shortcuts in Settings.
 - **Quick drawing.** Pen, highlighter, line, arrow, rectangle and text are always on the toolbar,
   in four thicknesses, no editor to open. Grab a drawing to move it, reshape it, recolour it or
@@ -161,6 +161,8 @@ When you stop, a window plays the recording on a loop. Nothing is saved yet:
 | --- | --- | --- |
 | **Save Video** | Return, `⌘S` | Save an MP4 (H.264) at full Retina resolution |
 | **Save GIF** | `⌘G` | Save a GIF with the preset beside the button |
+| **Trim** | `⌘T` | Cut off the start or the end: drag the yellow ends in, then click **Trim** |
+| | `⌘Z` | Undo the last trim |
 | **Discard** | `⌘⌫` | Throw the recording away |
 | | `Space` | Pause or play |
 | | `⌘W` | Close. If nothing is saved, Snapkeep asks before discarding. |

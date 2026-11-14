@@ -1,13 +1,14 @@
 import AppKit
 import AVKit
 
-/// A finished recording: plays it on a loop and lets the user keep it as a video, a GIF, both,
-/// or neither. The recording stays in a temporary file until it's saved.
+/// A finished recording: plays it on a loop, lets the user trim its start or end, and keep it as
+/// a video, a GIF, both, or neither. The recording stays in a temporary file until it's saved.
 @MainActor
 final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private static let bottomBarHeight: CGFloat = 52
 
-    let recording: Recording
+    /// The current cut. Trimming replaces it with a shorter file.
+    private(set) var recording: Recording
     var onClose: ((RecordingPreviewController) -> Void)?
 
     let panel: PreviewPanel
@@ -19,6 +20,8 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private var gifButton: NSButton!
     private let presetButton = NSPopUpButton(frame: .zero, pullsDown: true)
     private var finderButton: NSButton!
+    private var trimButton: NSButton!
+    private var discardButton: NSButton!
     private let statusLabel = NSTextField(labelWithString: "")
     private let progress = NSProgressIndicator()
     private var minContentWidth: CGFloat = 0
@@ -31,6 +34,12 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private var gifSizes: [GIFPreset: (bytes: Int, exact: Bool)] = [:]
     private var estimateTask: Task<Void, Never>?
     private var discardConfirmed = false
+    /// True from opening the trim bar until the trimmed file is ready.
+    private var isTrimming = false
+    private var trimTask: Task<Void, Never>?
+    private var trimItemStatus: NSKeyValueObservation?
+    /// The recording as it was before each trim, oldest first, so ⌘Z can put a trim back.
+    private var untrimmed: [Recording] = []
 
     private var isSaved: Bool { savedVideo != nil || savedGIF != nil }
 
@@ -45,9 +54,8 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         super.init()
         buildWindow()
         sizeWindow()
-        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: recording.url))
         player.isMuted = true
-        player.play()
+        startLooping()
         estimateGIFSizes()
     }
 
@@ -110,7 +118,8 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         updatePresetMenu()
         finderButton = textButton("Show in Finder", symbol: "folder", tip: "Show the saved file", action: #selector(showInFinder))
         finderButton.isEnabled = false
-        let discardButton = textButton("Discard", symbol: "trash", tip: "Throw the recording away (⌘⌫)", action: #selector(discard))
+        trimButton = textButton("Trim", symbol: "timeline.selection", tip: "Cut off the start or the end (⌘T)", action: #selector(trim))
+        discardButton = textButton("Discard", symbol: "trash", tip: "Throw the recording away (⌘⌫)", action: #selector(discard))
 
         progress.style = .bar
         progress.isIndeterminate = false
@@ -127,7 +136,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
 
-        let bar = NSStackView(views: [videoButton, gifButton, presetButton, finderButton, discardButton, progress, statusLabel])
+        let bar = NSStackView(views: [videoButton, gifButton, presetButton, trimButton, finderButton, discardButton, progress, statusLabel])
         bar.spacing = 8
         bar.setCustomSpacing(4, after: gifButton)
         bar.setCustomSpacing(14, after: discardButton)
@@ -190,11 +199,23 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         exportTask?.cancel()
         estimateTask?.cancel()
+        trimTask?.cancel()
+        trimItemStatus = nil
         player.pause()
         looper = nil
         player.removeAllItems()
-        try? FileManager.default.removeItem(at: recording.url)
+        for file in untrimmed.map(\.url) + [recording.url] {
+            try? FileManager.default.removeItem(at: file)
+        }
         onClose?(self)
+    }
+
+    private func startLooping() {
+        looper?.disableLooping()
+        looper = nil
+        player.removeAllItems()
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: recording.url))
+        player.play()
     }
 
     // MARK: Status
@@ -273,6 +294,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     // MARK: Actions
 
     @objc private func saveVideo() {
+        guard !isTrimming else { return }
         if let savedVideo {
             Clipboard.copyFile(savedVideo)
             statusLabel.stringValue = "Copied \(savedVideo.lastPathComponent)"
@@ -294,10 +316,11 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
             statusLabel.stringValue = "Copied \(savedGIF.url.lastPathComponent)"
             return
         }
-        guard exportTask == nil else { return }
+        guard exportTask == nil, !isTrimming else { return }
         let preset = preset
         gifButton.isEnabled = false
         presetButton.isEnabled = false
+        trimButton.isEnabled = false
         progress.doubleValue = 0
         progress.isHidden = false
         statusLabel.stringValue = "Making GIF…"
@@ -324,6 +347,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
             self.progress.isHidden = true
             self.gifButton.isEnabled = true
             self.presetButton.isEnabled = true
+            self.trimButton.isEnabled = true
             do {
                 let bytes = try result.get()
                 let url = try self.library.newFileURL(prefix: "recording", extension: "gif")
@@ -362,20 +386,140 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     }
 
     @objc private func discard() {
+        guard !isTrimming else { return }
         discardConfirmed = true
         panel.close()
         if !isSaved { Toast.show("Recording discarded", symbol: "trash") }
     }
 
+    // MARK: Trim
+
+    /// Opens the trim bar under the video: drag its yellow ends in, then click Trim.
+    @objc func trim() {
+        guard !isTrimming, exportTask == nil else { return }
+        setTrimming(true)
+        // The trim bar edits one player item, not the looper's copies of it.
+        looper?.disableLooping()
+        looper = nil
+        player.removeAllItems()
+        let item = AVPlayerItem(url: recording.url)
+        player.insert(item, after: nil)
+        trimItemStatus = item.observe(\.status, options: [.initial]) { [weak self] item, _ in
+            guard item.status != .unknown else { return }
+            Task { @MainActor in self?.beginTrimming(item) }
+        }
+    }
+
+    private func beginTrimming(_ item: AVPlayerItem) {
+        guard trimItemStatus != nil else { return }
+        trimItemStatus = nil
+        guard item.status == .readyToPlay, playerView.canBeginTrimming else {
+            endTrimming()
+            statusLabel.stringValue = "This recording can't be trimmed"
+            return
+        }
+        player.play()
+        playerView.beginTrimming { [weak self] result in
+            Task { @MainActor in self?.finishTrimming(item, keep: result == .okButton) }
+        }
+    }
+
+    private func finishTrimming(_ item: AVPlayerItem, keep: Bool) {
+        let full = CMTime(seconds: recording.duration, preferredTimescale: 600)
+        let start = item.reversePlaybackEndTime.isNumeric ? item.reversePlaybackEndTime : .zero
+        let end = item.forwardPlaybackEndTime.isNumeric ? min(item.forwardPlaybackEndTime, full) : full
+        let tolerance = CMTime(value: 1, timescale: 100)
+        guard keep, end - start > tolerance, start > tolerance || full - end > tolerance else {
+            endTrimming()
+            return
+        }
+
+        statusLabel.stringValue = "Trimming…"
+        progress.isIndeterminate = true
+        progress.isHidden = false
+        progress.startAnimation(nil)
+        let source = recording
+        let output = source.url.deletingLastPathComponent().appendingPathComponent("recording-\(UUID().uuidString).mp4")
+        trimTask = Task { @MainActor [weak self] in
+            let result: Result<Double, Error> = await Task.detached(priority: .userInitiated) {
+                do {
+                    return .success(try await VideoTrimmer.trim(video: source.url, range: CMTimeRange(start: start, end: end), to: output))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            guard let self, !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: output)
+                return
+            }
+            self.trimTask = nil
+            self.progress.stopAnimation(nil)
+            self.progress.isIndeterminate = false
+            self.progress.isHidden = true
+            switch result {
+            case let .success(duration):
+                self.untrimmed.append(source)
+                self.replaceRecording(Recording(url: output, pointSize: source.pointSize, pixelSize: source.pixelSize, duration: duration))
+                Toast.show("Trimmed to \(formatDuration(duration))", detail: "⌘Z puts back the part you cut", symbol: "timeline.selection")
+            case let .failure(error):
+                try? FileManager.default.removeItem(at: output)
+                self.endTrimming()
+                self.statusLabel.stringValue = "Couldn't trim: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Puts back the recording as it was before the last trim.
+    private func undoTrim() {
+        guard !isTrimming, exportTask == nil, let previous = untrimmed.popLast() else { return }
+        try? FileManager.default.removeItem(at: recording.url)
+        replaceRecording(previous)
+        Toast.show("Trim undone", detail: formatDuration(previous.duration), symbol: "arrow.uturn.backward")
+    }
+
+    /// A new cut is a different recording: what was saved and every GIF size no longer apply.
+    private func replaceRecording(_ new: Recording) {
+        player.removeAllItems()
+        recording = new
+        savedVideo = nil
+        savedGIF = nil
+        discardConfirmed = false
+        estimateTask?.cancel()
+        gifSizes = [:]
+        panel.title = "Recording, \(formatDuration(new.duration))"
+        updatePresetMenu()
+        endTrimming()
+        estimateGIFSizes()
+    }
+
+    private func endTrimming() {
+        setTrimming(false)
+        startLooping()
+        showDetails()
+    }
+
+    /// While the trim bar is open, its own Trim and Cancel buttons take Return and Escape.
+    private func setTrimming(_ trimming: Bool) {
+        isTrimming = trimming
+        for button in [videoButton, gifButton, presetButton, trimButton, discardButton] as [NSButton] {
+            button.isEnabled = !trimming
+        }
+        finderButton.isEnabled = !trimming && isSaved
+        videoButton.keyEquivalent = trimming ? "" : "\r"
+    }
+
     // MARK: Keys
 
     private func handleKey(_ event: NSEvent) -> Bool {
+        if isTrimming { return false }
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if modifiers == .command {
             switch key {
             case "s": saveVideo()
             case "g": saveGIF()
+            case "t": trim()
+            case "z": undoTrim()
             case "w": panel.performClose(nil)
             default:
                 if event.keyCode == 51 { // ⌘⌫
