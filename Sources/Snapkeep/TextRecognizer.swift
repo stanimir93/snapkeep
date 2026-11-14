@@ -33,3 +33,23 @@ enum Clipboard {
         pasteboard.writeObjects([url as NSURL])
     }
 }
+
+/// Files copied without being saved: Copy Video and Copy GIF. They wait in Snapkeep's caches
+/// folder under a recording-… name so a paste attaches them with that name. Each copy replaces
+/// the last one, since the clipboard only holds the newest.
+enum ClipboardFiles {
+    static var folder: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.stanimir.snapkeep/Clipboard", isDirectory: true)
+    }
+
+    /// Copies `source` into the folder, emptied first, and returns the copy for the clipboard.
+    static func stage(_ source: URL, as ext: String, in folder: URL = folder, date: Date = Date()) throws -> URL {
+        let manager = FileManager.default
+        try? manager.removeItem(at: folder)
+        try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(ScreenshotLibrary.fileName(for: date, prefix: "recording", extension: ext))
+        try manager.copyItem(at: source, to: url)
+        return url
+    }
+}

@@ -458,9 +458,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// `Snapkeep --render-recording out-dir`: records nothing. Makes a short test video, saves it
-    /// as out-dir/check.gif, and shows the recording preview and controls for a few seconds. Their
-    /// window numbers are printed for `screencapture -l`, since the player keeps the preview
-    /// from rendering offscreen.
+    /// as out-dir/check.gif, and shows the recording preview and controls for a few seconds. The
+    /// preview is drawn to out-dir/recording.png with the video area left blank, since the player
+    /// doesn't render offscreen; the window numbers are printed for `screencapture -l` too.
     private func runRecordingCheck(arguments: [String]) {
         guard let path = arguments.first else {
             print("usage: Snapkeep --render-recording <output-dir> [--trim]")
@@ -486,6 +486,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 controls.show()
                 if arguments.contains("--trim") { preview.trim() }
                 try await Task.sleep(for: .milliseconds(300))
+                if let view = preview.panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try rep.representation(using: .png, properties: [:])?.write(to: output.appendingPathComponent("recording.png"))
+                }
                 let others = NSApp.windows.filter { $0.isVisible && $0 !== preview.panel }.map { String($0.windowNumber) }
                 print("preview window \(preview.panel.windowNumber), controls windows \(others.joined(separator: " "))")
                 fflush(stdout)

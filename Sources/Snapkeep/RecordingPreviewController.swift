@@ -1,8 +1,8 @@
 import AppKit
 import AVKit
 
-/// A finished recording: plays it on a loop, lets the user trim its start or end, and keep it as
-/// a video, a GIF, both, or neither. The recording stays in a temporary file until it's saved.
+/// A finished recording: plays it on a loop, lets the user trim its start or end, and save or copy
+/// it as a video, a GIF, both, or neither. The recording stays in a temporary file until it's saved.
 @MainActor
 final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private static let bottomBarHeight: CGFloat = 52
@@ -17,7 +17,9 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private var videoButton: NSButton!
+    private var copyVideoButton: NSButton!
     private var gifButton: NSButton!
+    private var copyGIFButton: NSButton!
     private let presetButton = NSPopUpButton(frame: .zero, pullsDown: true)
     private var finderButton: NSButton!
     private var trimButton: NSButton!
@@ -28,6 +30,9 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
 
     private var savedVideo: URL?
     private var savedGIF: (url: URL, preset: GIFPreset)?
+    /// GIFs of the current cut already made, by preset, kept next to it until the window closes.
+    private var madeGIFs: [GIFPreset: URL] = [:]
+    private var copied = false
     private var exportTask: Task<Void, Never>?
     private var preset = GIFPreset.lastUsed
     /// Each preset's GIF size in bytes: estimated, then exact once that GIF is made.
@@ -42,6 +47,8 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     private var untrimmed: [Recording] = []
 
     private var isSaved: Bool { savedVideo != nil || savedGIF != nil }
+    /// Saved or copied: closing doesn't ask first.
+    private var isKept: Bool { isSaved || copied }
 
     init(recording: Recording, library: ScreenshotLibrary) {
         self.recording = recording
@@ -111,8 +118,12 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         videoButton.keyEquivalent = "\r" // default button: Return saves the video
         videoButton.toolTip = "Save as an MP4 video and copy the file (⌘S)"
 
+        copyVideoButton = textButton("Copy Video", symbol: "doc.on.doc", tip: "Copy the MP4 video without saving it (⌘C)",
+                                     action: #selector(copyVideo))
         gifButton = textButton("Save GIF", symbol: "photo.stack", tip: "Save as a GIF with the preset beside it, and copy the file (⌘G)",
                                action: #selector(saveGIF))
+        copyGIFButton = textButton("Copy GIF", symbol: "doc.on.doc", tip: "Copy a GIF with the preset beside it, without saving it (⇧⌘C)",
+                                   action: #selector(copyGIF))
         presetButton.controlSize = .large
         presetButton.toolTip = "How big and smooth the GIF is, and about how much space it takes"
         updatePresetMenu()
@@ -136,9 +147,12 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
 
-        let bar = NSStackView(views: [videoButton, gifButton, presetButton, trimButton, finderButton, discardButton, progress, statusLabel])
+        let bar = NSStackView(views: [videoButton, copyVideoButton, gifButton, copyGIFButton, presetButton,
+                                      trimButton, finderButton, discardButton, progress, statusLabel])
         bar.spacing = 8
-        bar.setCustomSpacing(4, after: gifButton)
+        bar.setCustomSpacing(16, after: copyVideoButton)
+        bar.setCustomSpacing(4, after: copyGIFButton)
+        bar.setCustomSpacing(16, after: presetButton)
         bar.setCustomSpacing(14, after: discardButton)
         bar.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         bar.alignment = .centerY
@@ -179,12 +193,12 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
     }
 
-    /// Asks first if nothing was saved.
+    /// Asks first if nothing was saved or copied.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        if isSaved || discardConfirmed { return true }
+        if isKept || discardConfirmed { return true }
         let alert = NSAlert()
         alert.messageText = "Discard this recording?"
-        alert.informativeText = "It hasn't been saved as a video or a GIF."
+        alert.informativeText = "It hasn't been saved or copied as a video or a GIF."
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Cancel")
         alert.buttons[0].hasDestructiveAction = true
@@ -204,7 +218,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         player.pause()
         looper = nil
         player.removeAllItems()
-        for file in untrimmed.map(\.url) + [recording.url] {
+        for file in untrimmed.map(\.url) + [recording.url] + Array(madeGIFs.values) {
             try? FileManager.default.removeItem(at: file)
         }
         onClose?(self)
@@ -310,23 +324,65 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         }
     }
 
+    @objc private func copyVideo() {
+        guard !isTrimming else { return }
+        if let savedVideo {
+            Clipboard.copyFile(savedVideo)
+            didCopy(savedVideo)
+            return
+        }
+        do {
+            let url = try ClipboardFiles.stage(recording.url, as: "mp4")
+            Clipboard.copyFile(url)
+            didCopy(url)
+        } catch {
+            statusLabel.stringValue = "Couldn't copy: \(error.localizedDescription)"
+        }
+    }
+
     @objc private func saveGIF() {
         if let savedGIF, savedGIF.preset == preset {
             Clipboard.copyFile(savedGIF.url)
             statusLabel.stringValue = "Copied \(savedGIF.url.lastPathComponent)"
             return
         }
+        makeGIF { [weak self] gif, preset in
+            guard let self else { return }
+            let url = try self.library.newFileURL(prefix: "recording", extension: "gif")
+            try FileManager.default.copyItem(at: gif, to: url)
+            self.savedGIF = (url, preset)
+            self.didSave(url, detail: self.fileSize(url))
+        }
+    }
+
+    @objc private func copyGIF() {
+        if let savedGIF, savedGIF.preset == preset {
+            Clipboard.copyFile(savedGIF.url)
+            didCopy(savedGIF.url)
+            return
+        }
+        makeGIF { [weak self] gif, _ in
+            let url = try ClipboardFiles.stage(gif, as: "gif")
+            Clipboard.copyFile(url)
+            self?.didCopy(url)
+        }
+    }
+
+    /// Hands the selected preset's GIF to `then`, making it first unless it's already made.
+    private func makeGIF(then: @escaping @MainActor (URL, GIFPreset) throws -> Void) {
         guard exportTask == nil, !isTrimming else { return }
         let preset = preset
-        gifButton.isEnabled = false
-        presetButton.isEnabled = false
-        trimButton.isEnabled = false
+        if let made = madeGIFs[preset] {
+            do { try then(made, preset) } catch { statusLabel.stringValue = "Couldn't keep the GIF: \(error.localizedDescription)" }
+            return
+        }
+        setGIFControlsEnabled(false)
         progress.doubleValue = 0
         progress.isHidden = false
         statusLabel.stringValue = "Making GIF…"
 
         let video = recording.url, pointSize = recording.pointSize
-        let temporary = video.deletingPathExtension().appendingPathExtension("gif")
+        let output = video.deletingPathExtension().appendingPathExtension("\(preset.rawValue).gif")
         let report: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor in self?.progress.doubleValue = fraction }
         }
@@ -334,33 +390,40 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
             let result: Result<Int, Error> = await Task.detached(priority: .userInitiated) {
                 do {
                     return .success(try await GIFExporter.export(video: video, pointSize: pointSize, preset: preset,
-                                                                 to: temporary, progress: report))
+                                                                 to: output, progress: report))
                 } catch {
                     return .failure(error)
                 }
             }.value
             guard let self, !Task.isCancelled else {
-                try? FileManager.default.removeItem(at: temporary)
+                try? FileManager.default.removeItem(at: output)
                 return
             }
             self.exportTask = nil
             self.progress.isHidden = true
-            self.gifButton.isEnabled = true
-            self.presetButton.isEnabled = true
-            self.trimButton.isEnabled = true
+            self.setGIFControlsEnabled(true)
             do {
                 let bytes = try result.get()
-                let url = try self.library.newFileURL(prefix: "recording", extension: "gif")
-                try FileManager.default.moveItem(at: temporary, to: url)
-                self.savedGIF = (url, preset)
+                self.madeGIFs[preset] = output
                 self.gifSizes[preset] = (bytes, true)
                 self.updatePresetMenu()
-                self.didSave(url, detail: self.fileSize(url))
+                try then(output, preset)
             } catch {
-                try? FileManager.default.removeItem(at: temporary)
                 self.statusLabel.stringValue = "Couldn't make the GIF: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func setGIFControlsEnabled(_ enabled: Bool) {
+        for button in [gifButton, copyGIFButton, presetButton, trimButton] as [NSButton] { button.isEnabled = enabled }
+    }
+
+    private func didCopy(_ url: URL) {
+        copied = true
+        Toast.show("Copied \(url.pathExtension.uppercased())", detail: "\(url.lastPathComponent)  ·  \(fileSize(url))",
+                   symbol: "doc.on.clipboard.fill")
+        showDetails()
+        statusLabel.stringValue = "Copied \(url.pathExtension.uppercased())  ·  \(fileSize(url))"
     }
 
     private func didSave(_ url: URL, detail: String) {
@@ -477,12 +540,16 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         Toast.show("Trim undone", detail: formatDuration(previous.duration), symbol: "arrow.uturn.backward")
     }
 
-    /// A new cut is a different recording: what was saved and every GIF size no longer apply.
+    /// A new cut is a different recording: what was saved or copied, the GIFs made and every GIF
+    /// size no longer apply.
     private func replaceRecording(_ new: Recording) {
         player.removeAllItems()
         recording = new
         savedVideo = nil
         savedGIF = nil
+        copied = false
+        madeGIFs.values.forEach { try? FileManager.default.removeItem(at: $0) }
+        madeGIFs = [:]
         discardConfirmed = false
         estimateTask?.cancel()
         gifSizes = [:]
@@ -501,7 +568,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
     /// While the trim bar is open, its own Trim and Cancel buttons take Return and Escape.
     private func setTrimming(_ trimming: Bool) {
         isTrimming = trimming
-        for button in [videoButton, gifButton, presetButton, trimButton, discardButton] as [NSButton] {
+        for button in [videoButton, copyVideoButton, gifButton, copyGIFButton, presetButton, trimButton, discardButton] as [NSButton] {
             button.isEnabled = !trimming
         }
         finderButton.isEnabled = !trimming && isSaved
@@ -517,6 +584,7 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
         if modifiers == .command {
             switch key {
             case "s": saveVideo()
+            case "c": copyVideo()
             case "g": saveGIF()
             case "t": trim()
             case "z": undoTrim()
@@ -528,6 +596,10 @@ final class RecordingPreviewController: NSObject, NSWindowDelegate {
                 }
                 return false
             }
+            return true
+        }
+        if modifiers == [.command, .shift], key == "c" {
+            copyGIF()
             return true
         }
         if modifiers.isEmpty, key == " " {

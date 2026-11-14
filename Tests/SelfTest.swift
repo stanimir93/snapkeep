@@ -34,6 +34,15 @@ struct SelfTest {
         check(second.lastPathComponent == "screenshot-2026-03-07_09-05-02-2.png", "same-second capture gets -2")
         check(library.newest()?.resolvingSymlinksInPath().path == first.resolvingSymlinksInPath().path, "finds the newest screenshot: \(library.newest()?.lastPathComponent ?? "none")")
         check(ScreenshotLibrary.fileName(for: date, prefix: "recording", extension: "gif") == "recording-2026-03-07_09-05-02.gif", "recordings are named recording-…")
+        let clipboardFolder = dir.appendingPathComponent("Clipboard")
+        let source = dir.appendingPathComponent("source.gif")
+        FileManager.default.createFile(atPath: source.path, contents: Data("gif".utf8))
+        let staleCopy = try! ClipboardFiles.stage(source, as: "mp4", in: clipboardFolder, date: date)
+        let copied = try! ClipboardFiles.stage(source, as: "gif", in: clipboardFolder, date: date)
+        check(copied.lastPathComponent == "recording-2026-03-07_09-05-02.gif", "a copied GIF is named recording-…: \(copied.lastPathComponent)")
+        check(FileManager.default.fileExists(atPath: source.path) && FileManager.default.contents(atPath: copied.path) == Data("gif".utf8),
+              "copying keeps the original and the bytes")
+        check(!FileManager.default.fileExists(atPath: staleCopy.path), "each copy replaces the last one")
 
         print("Rendering")
         let sampleURL = dir.appendingPathComponent("sample.png")
